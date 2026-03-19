@@ -1,153 +1,126 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YV-STUDIO ULTIMATE v4 - FIXED</title>
-
-<script src="https://cdn.tailwindcss.com"></script>
-
-<style>
-body{
-    margin:0;
-    background:#000;
-    color:white;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    height:100vh;
-    font-family:sans-serif;
-}
-
-#visualizer{
-    width:400px;
-    height:200px;
-    background:black;
-}
-
-button{
-    margin-top:20px;
-    padding:10px 20px;
-    background:white;
-    color:black;
-    border:none;
-    cursor:pointer;
-}
-</style>
-</head>
-
-<body>
-
-<div>
-    <canvas id="visualizer"></canvas><br>
-    <input type="file" id="audioFile"><br>
-    <button onclick="exportMp4()">EXPORTAR VIDEO</button>
-</div>
-
-<audio id="audioSource"></audio>
+<!-- TODO TU HTML ORIGINAL SE MANTIENE IGUAL -->
+<!-- SOLO TE MUESTRO LAS PARTES CORREGIDAS INTEGRADAS -->
 
 <script>
-const canvas = document.getElementById("visualizer");
-const ctx = canvas.getContext("2d");
-const audio = document.getElementById("audioSource");
+const audio = document.getElementById('audioSource');
+const canvas = document.getElementById('visualizer');
+const ctx = canvas.getContext('2d');
 
-let audioCtx, analyser, dataArray, dest;
+let audioCtx, analyser, dataArray;
 let isExporting = false;
 
-// cargar audio
-document.getElementById("audioFile").onchange = e=>{
-    const file = e.target.files[0];
-    if(file){
-        audio.src = URL.createObjectURL(file);
-    }
-};
-
-// setup audio
-function setupAudio(){
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    analyser = audioCtx.createAnalyser();
-    const source = audioCtx.createMediaElementSource(audio);
-
-    dest = audioCtx.createMediaStreamDestination();
-
-    source.connect(analyser);
-    analyser.connect(dest);
-    analyser.connect(audioCtx.destination);
-
-    analyser.fftSize = 256;
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-}
-
-// visualizador
-function draw(){
+// 🎯 DRAW CORREGIDO (FIX PRINCIPAL)
+function draw() {
     requestAnimationFrame(draw);
 
-    if(!analyser) return;
+    if(analyser) analyser.getByteFrequencyData(dataArray);
 
-    analyser.getByteFrequencyData(dataArray);
+    // ❌ YA NO se cambia tamaño dinámicamente
+    const w = canvas.width;
+    const h = canvas.height;
 
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.clearRect(0, 0, w, h);
 
-    const barWidth = (canvas.width / dataArray.length)*2;
-    let x = 0;
+    const waveColor = document.getElementById('cWaves').value || "#10b981";
+    const time = Date.now() * 0.003;
 
-    for(let i=0;i<dataArray.length;i++){
-        const barHeight = dataArray[i];
-        ctx.fillStyle = "lime";
-        ctx.fillRect(x, canvas.height-barHeight, barWidth, barHeight);
-        x += barWidth + 1;
+    let bass = 0; 
+    if(dataArray && !audio.paused) { 
+        for(let i=0; i<5; i++) bass += dataArray[i]; 
+        bass = (bass/5)/255; 
     }
+
+    const drawWave = (amp, freq, speed, op, thick) => {
+        ctx.beginPath(); 
+        ctx.lineWidth = thick; 
+        ctx.strokeStyle = waveColor + op;
+
+        for(let x=0; x<=w; x+=4) {
+            const y = (h/2) + Math.sin(x*freq + time*speed) * amp;
+            if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+    };
+
+    drawWave(30+(bass*60), 0.004, 0.5, "33", 10);
+    drawWave(20+(bass*80), 0.008, 1.2, "88", 6);
+    drawWave(10+(bass*30), 0.015, 2.0, "FF", 3);
 }
-draw();
 
-// 🚀 EXPORTAR VIDEO (FIXED)
-async function exportMp4(){
+window.onload = () => {
+    // 🔥 tamaño inicial fijo (IMPORTANTE)
+    canvas.width = canvas.clientWidth * 2;
+    canvas.height = canvas.clientHeight * 2;
 
+    draw();
+};
+
+// 🚀 EXPORT CORREGIDO
+async function exportMp4() {
     if(isExporting) return;
 
-    if(!audio.src){
-        alert("Carga un audio primero");
+    const btn = document.getElementById('btnMp4');
+    const status = document.getElementById('exportStatus');
+
+    if (!audio.src) {
+        status.innerText = "Carga un audio primero";
+        status.classList.add('active');
         return;
     }
 
-    try{
+    try {
         isExporting = true;
+        btn.disabled = true;
+        status.innerText = "Grabando video...";
+        status.classList.add('active');
 
-        // 🔥 FIX CRÍTICO: tamaño real del canvas
+        // 🔥 FIJAR resolución SOLO UNA VEZ
         canvas.width = canvas.clientWidth * 2;
         canvas.height = canvas.clientHeight * 2;
 
-        if(!audioCtx) setupAudio();
+        if(!audioCtx){
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioCtx.createAnalyser();
+
+            const source = audioCtx.createMediaElementSource(audio);
+            const dest = audioCtx.createMediaStreamDestination();
+
+            source.connect(analyser);
+            analyser.connect(dest);
+            analyser.connect(audioCtx.destination);
+
+            analyser.fftSize = 256;
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            window.recordDest = dest;
+        }
 
         await audioCtx.resume();
 
-        const canvasStream = canvas.captureStream(30);
+        const stream = canvas.captureStream(30);
 
         const combined = new MediaStream([
-            ...canvasStream.getVideoTracks(),
-            ...dest.stream.getAudioTracks()
+            ...stream.getVideoTracks(),
+            ...window.recordDest.stream.getAudioTracks()
         ]);
 
-        let options = { mimeType: "video/webm;codecs=vp8" };
-        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-            options = { mimeType: "video/webm" };
-        }
+        const recorder = new MediaRecorder(combined, {
+            mimeType: "video/webm;codecs=vp8"
+        });
 
-        const recorder = new MediaRecorder(combined, options);
         const chunks = [];
 
-        recorder.ondataavailable = e=>{
+        recorder.ondataavailable = e => {
             if(e.data.size > 0) chunks.push(e.data);
         };
 
-        recorder.onerror = e=>{
-            console.error("MediaRecorder error:", e);
-            alert("Error al grabar video");
+        recorder.onerror = e => {
+            console.error(e);
+            status.innerText = "Error de grabación";
         };
 
-        recorder.onstop = ()=>{
-            const blob = new Blob(chunks,{type:"video/webm"});
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: "video/webm" });
             const url = URL.createObjectURL(blob);
 
             const a = document.createElement("a");
@@ -155,25 +128,27 @@ async function exportMp4(){
             a.download = "YV_STUDIO_EXPORT.webm";
             a.click();
 
+            status.innerText = "Exportación completa";
+            setTimeout(()=>status.classList.remove('active'),2000);
+
             isExporting = false;
+            btn.disabled = false;
         };
 
         audio.currentTime = 0;
         await audio.play();
         recorder.start();
 
-        audio.onended = ()=>{
+        audio.onended = () => {
             recorder.stop();
             audio.pause();
         };
 
-    }catch(err){
+    } catch (err) {
         console.error(err);
-        alert("Error en exportación");
+        status.innerText = "Error en el proceso";
         isExporting = false;
+        btn.disabled = false;
     }
 }
 </script>
-
-</body>
-</html>
