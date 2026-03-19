@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YV-STUDIO ULTIMATE v4 - MP4 Edition</title>
+<title>YV-STUDIO ULTIMATE v4 - FIXED</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 
@@ -51,16 +51,15 @@ const canvas = document.getElementById("visualizer");
 const ctx = canvas.getContext("2d");
 const audio = document.getElementById("audioSource");
 
-canvas.width = 400;
-canvas.height = 200;
-
 let audioCtx, analyser, dataArray, dest;
 let isExporting = false;
 
 // cargar audio
 document.getElementById("audioFile").onchange = e=>{
     const file = e.target.files[0];
-    audio.src = URL.createObjectURL(file);
+    if(file){
+        audio.src = URL.createObjectURL(file);
+    }
 };
 
 // setup audio
@@ -102,7 +101,7 @@ function draw(){
 }
 draw();
 
-// 🚀 EXPORTAR VIDEO (CORREGIDO)
+// 🚀 EXPORTAR VIDEO (FIXED)
 async function exportMp4(){
 
     if(isExporting) return;
@@ -112,51 +111,67 @@ async function exportMp4(){
         return;
     }
 
-    isExporting = true;
+    try{
+        isExporting = true;
 
-    if(!audioCtx) setupAudio();
+        // 🔥 FIX CRÍTICO: tamaño real del canvas
+        canvas.width = canvas.clientWidth * 2;
+        canvas.height = canvas.clientHeight * 2;
 
-    await audioCtx.resume();
+        if(!audioCtx) setupAudio();
 
-    const canvasStream = canvas.captureStream(30);
+        await audioCtx.resume();
 
-    const combined = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...dest.stream.getAudioTracks()
-    ]);
+        const canvasStream = canvas.captureStream(30);
 
-    let options = { mimeType: "video/webm;codecs=vp8" };
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: "video/webm" };
-    }
+        const combined = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...dest.stream.getAudioTracks()
+        ]);
 
-    const recorder = new MediaRecorder(combined, options);
-    const chunks = [];
+        let options = { mimeType: "video/webm;codecs=vp8" };
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            options = { mimeType: "video/webm" };
+        }
 
-    recorder.ondataavailable = e=>{
-        if(e.data.size>0) chunks.push(e.data);
-    };
+        const recorder = new MediaRecorder(combined, options);
+        const chunks = [];
 
-    recorder.onstop = ()=>{
-        const blob = new Blob(chunks,{type:"video/webm"});
-        const url = URL.createObjectURL(blob);
+        recorder.ondataavailable = e=>{
+            if(e.data.size > 0) chunks.push(e.data);
+        };
 
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "YV_STUDIO_EXPORT.webm";
-        a.click();
+        recorder.onerror = e=>{
+            console.error("MediaRecorder error:", e);
+            alert("Error al grabar video");
+        };
 
+        recorder.onstop = ()=>{
+            const blob = new Blob(chunks,{type:"video/webm"});
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "YV_STUDIO_EXPORT.webm";
+            a.click();
+
+            isExporting = false;
+        };
+
+        audio.currentTime = 0;
+        await audio.play();
+        recorder.start();
+
+        audio.onended = ()=>{
+            recorder.stop();
+            audio.pause();
+        };
+
+    }catch(err){
+        console.error(err);
+        alert("Error en exportación");
         isExporting = false;
-    };
-
-    audio.currentTime = 0;
-    await audio.play();
-    recorder.start();
-
-    audio.onended = ()=>{
-        recorder.stop();
-        audio.pause();
-    };
+    }
 }
 </script>
 
