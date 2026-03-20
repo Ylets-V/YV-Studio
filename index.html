@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YV-STUDIO ULTIMATE v4 - MP4 Edition</title>
+    <title>YV-STUDIO ULTIMATE v4.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&family=Outfit:wght@300;400;600&family=Bebas+Neue&family=Montserrat:wght@900&family=Playfair+Display:ital,wght@1,900&family=Space+Grotesk:wght@700&family=Inter:wght@400;900&display=swap" rel="stylesheet">
     <style>
@@ -27,6 +27,8 @@
             --panel-bg-left: rgba(0, 0, 0, 0.7);
             --panel-bg-right: rgba(0, 0, 0, 0.7);
             --player-scale: 1;
+            --player-internal-zoom: 1;
+            --export-padding: 0px;
         }
 
         input::-webkit-outer-spin-button,
@@ -98,7 +100,7 @@
         }
         #stylePanel.active { transform: translateX(0); }
 
-        .edge-trigger { position: fixed; top: 0; bottom: 0; width: 40px; z-index: 999; }
+        .edge-trigger { position: fixed; top: 0; bottom: 0; width: 40px; z-index: 999; cursor: pointer; }
         .trigger-left { left: 0; }
         .trigger-right { right: 0; }
 
@@ -124,7 +126,7 @@
 
         .glass-overlay {
             position: absolute;
-            inset: 15px;
+            inset: calc(15px + var(--export-padding)); 
             background: rgba(255, 255, 255, 0.03);
             backdrop-filter: blur(var(--glass-blur));
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -135,6 +137,18 @@
             justify-content: space-between;
             padding: 40px 20px;
             z-index: 2;
+            transition: inset 0.2s ease;
+        }
+
+        #internalZoomContainer {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            transform: scale(var(--player-internal-zoom));
+            transition: transform 0.2s ease;
         }
 
         #playerContainer {
@@ -171,34 +185,28 @@
 
         input[type="color"] { -webkit-appearance: none; border: none; width: 100%; height: 25px; cursor: pointer; background: none; padding: 0; }
         input[type="color"]::-webkit-color-swatch { border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); }
-        
-        #exportStatus { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 2000; pointer-events: none; opacity: 0; transition: 0.3s; }
-        #exportStatus.active { opacity: 1; }
     </style>
 </head>
 <body>
 
     <div class="web-color-overlay"></div>
     <div class="web-bg" id="webBackground"></div>
-    
-    <div id="exportStatus" class="bg-white text-black px-6 py-3 rounded-full font-black text-xs uppercase shadow-2xl tracking-tighter">
-        Procesando Video... Por favor espera.
-    </div>
 
     <div class="edge-trigger trigger-left" onmouseenter="openSidebar('toolPanel')"></div>
     <div class="edge-trigger trigger-right" onmouseenter="openSidebar('stylePanel')"></div>
 
+    <!-- PANEL IZQUIERDO: HERRAMIENTAS -->
     <aside class="sidebar" id="toolPanel">
         <div class="mb-4 text-center">
             <h1 class="text-3xl font-black italic tracking-tighter">YV-STUDIO</h1>
-            <p class="text-[10px] opacity-50 uppercase tracking-widest">Ultimate Editor v4</p>
+            <p class="text-[10px] opacity-50 uppercase tracking-widest">Ultimate Editor v4.1</p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
             <button class="btn-glass" onclick="document.getElementById('fAudio').click()">CARGAR AUDIO</button>
             <button class="btn-glass" onclick="document.getElementById('fPin').click()">CARGAR PORTADA</button>
-            <input type="file" id="fAudio" class="hidden" onchange="handleFile(event, 'audio')">
-            <input type="file" id="fPin" class="hidden" onchange="handleFile(event, 'pin')">
+            <input type="file" id="fAudio" class="hidden" accept="audio/*" onchange="handleFile(event, 'audio')">
+            <input type="file" id="fPin" class="hidden" accept="image/*" onchange="handleFile(event, 'pin')">
         </div>
 
         <div class="input-group">
@@ -223,29 +231,35 @@
             </div>
             <div class="mt-3">
                 <button class="btn-glass !py-2 !text-[8px]" onclick="document.getElementById('fileFontCustom').click()">SUBIR ARCHIVO .OTF / .TTF</button>
-                <input type="file" id="fileFontCustom" class="hidden" onchange="handleCustomFontFile(event)">
+                <input type="file" id="fileFontCustom" class="hidden" accept=".otf,.ttf" onchange="handleCustomFontFile(event)">
             </div>
         </div>
 
         <div class="input-group">
-            <label>Dimensiones & Zoom</label>
+            <label>Forma & Estructura</label>
+            <div class="space-y-3">
+                <div>
+                    <span class="text-[8px] opacity-40 font-bold uppercase">REDONDEAR ESQUINAS</span>
+                    <input type="range" id="inRadius" min="0" max="100" value="20" oninput="updateDimensions()" class="w-full accent-white">
+                </div>
+                <div>
+                    <span class="text-[8px] opacity-40 font-bold uppercase">ZOOM PLAYER (AGRANDAR)</span>
+                    <input type="range" id="inPlayerZoom" min="0.5" max="2" step="0.05" value="1" oninput="updateDimensions()" class="w-full accent-white">
+                </div>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>Dimensiones Canvas & Zoom Vista</label>
             <div class="grid grid-cols-2 gap-3 mb-3">
                 <input type="number" id="inWidth" class="field" value="380" oninput="updateDimensions()">
                 <input type="number" id="inHeight" class="field" value="675" oninput="updateDimensions()">
             </div>
             <input type="range" id="uiScale" min="0.3" max="1.5" step="0.05" value="1" oninput="updateDimensions()" class="w-full accent-white">
         </div>
-
-        <div class="input-group">
-            <label>Ajustes de Capa (Pin)</label>
-            <div class="space-y-3">
-                <div><span class="text-[8px] opacity-40 font-bold uppercase">BRILLO</span><input type="range" id="pinBrightness" min="0.2" max="1.5" step="0.05" value="1" oninput="updatePinFilters()" class="w-full accent-white"></div>
-                <div><span class="text-[8px] opacity-40 font-bold uppercase">CONTRASTE</span><input type="range" id="pinContrast" min="0.5" max="2" step="0.05" value="1" oninput="updatePinFilters()" class="w-full accent-white"></div>
-                <div><span class="text-[8px] opacity-40 font-bold uppercase">SATURACIÓN</span><input type="range" id="pinSaturate" min="0" max="3" step="0.1" value="1" oninput="updatePinFilters()" class="w-full accent-white"></div>
-            </div>
-        </div>
     </aside>
 
+    <!-- PANEL DERECHO: ESTILOS -->
     <aside class="sidebar" id="stylePanel">
         <div class="mb-4 text-center">
             <h1 class="text-3xl font-black italic tracking-tighter">ESTILOS</h1>
@@ -288,24 +302,16 @@
             </div>
             <div class="space-y-3">
                 <button class="btn-glass !py-2 !text-[10px]" onclick="document.getElementById('fWeb').click()">CARGAR IMAGEN WEB</button>
-                <input type="file" id="fWeb" class="hidden" onchange="handleFile(event, 'web')">
+                <input type="file" id="fWeb" class="hidden" accept="image/*" onchange="handleFile(event, 'web')">
                 
                 <div class="grid grid-cols-2 gap-3">
                     <div><span class="text-[8px] opacity-40 font-bold uppercase">BRILLO</span><input type="range" id="bgBrightness" min="0" max="1" step="0.05" value="0.3" oninput="updateWebAdjustments()" class="w-full accent-white"></div>
                     <div><span class="text-[8px] opacity-40 font-bold uppercase">DESENFOQUE</span><input type="range" id="bgBlur" min="0" max="50" value="8" oninput="updateWebAdjustments()" class="w-full accent-white"></div>
                 </div>
-                
                 <hr class="opacity-10 my-1">
-                
                 <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <span class="text-[8px] opacity-40 font-bold uppercase">OPACIDAD IZQ</span>
-                        <input type="range" id="opLeft" min="0" max="1" step="0.05" value="0.7" oninput="updatePanelOpacity()" class="w-full accent-white">
-                    </div>
-                    <div>
-                        <span class="text-[8px] opacity-40 font-bold uppercase">OPACIDAD DER</span>
-                        <input type="range" id="opRight" min="0" max="1" step="0.05" value="0.7" oninput="updatePanelOpacity()" class="w-full accent-white">
-                    </div>
+                    <div><span class="text-[8px] opacity-40 font-bold uppercase">OPACIDAD IZQ</span><input type="range" id="opLeft" min="0" max="1" step="0.05" value="0.7" oninput="updatePanelOpacity()" class="w-full accent-white"></div>
+                    <div><span class="text-[8px] opacity-40 font-bold uppercase">OPACIDAD DER</span><input type="range" id="opRight" min="0" max="1" step="0.05" value="0.7" oninput="updatePanelOpacity()" class="w-full accent-white"></div>
                 </div>
             </div>
         </div>
@@ -315,9 +321,8 @@
             <input type="range" id="inBlurPx" min="0" max="60" value="15" oninput="updateUI()" class="w-full accent-white">
         </div>
 
-        <div class="mt-auto grid grid-cols-2 gap-3">
-            <button class="btn-glass py-4 text-[11px]" onclick="downloadPinImage()">GUARDAR PNG</button>
-            <button class="btn-glass btn-primary py-4 text-[11px]" id="btnMp4" onclick="exportMp4()">EXPORTAR MP4</button>
+        <div class="mt-auto">
+            <button class="btn-glass btn-primary py-4 text-[11px]" onclick="downloadPinImage()">GUARDAR DISEÑO (PNG)</button>
         </div>
     </aside>
 
@@ -325,25 +330,27 @@
         <div id="scaleWrapper">
             <div class="pin-wrapper" id="pinFrame">
                 <div class="glass-overlay" id="glassLayer">
-                    <div class="text-center w-full px-4">
-                        <h2 id="outTitle" class="font-black uppercase tracking-tighter leading-tight mb-3">Track Title</h2>
-                        <p id="outArtist" class="tracking-[5px] uppercase opacity-70">Artist Name</p>
-                    </div>
-
-                    <canvas id="visualizer" class="w-full h-32"></canvas>
-
-                    <div id="playerContainer" class="w-full px-6">
-                        <input type="range" id="seekBar" class="seek-bar" value="0" step="0.1" oninput="seek(this.value)">
-                        <div class="flex justify-between w-full mt-2 text-[9px] font-bold opacity-50">
-                            <span id="curTime">00:00</span>
-                            <span id="durTime">00:00</span>
+                    <div id="internalZoomContainer">
+                        <div class="text-center w-full px-4">
+                            <h2 id="outTitle" class="font-black uppercase tracking-tighter leading-tight mb-3">Track Title</h2>
+                            <p id="outArtist" class="tracking-[5px] uppercase opacity-70">Artist Name</p>
                         </div>
-                        <div class="flex justify-center mt-6">
-                            <button onclick="togglePlay(event)" id="playBtn" class="w-14 h-14 rounded-full border border-white/20 flex items-center justify-center hover:bg-white/10 transition-all">
-                                <svg id="playIcon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.333-5.89a1.5 1.5 0 000-2.538L6.3 2.841z"></path>
-                                </svg>
-                            </button>
+
+                        <canvas id="visualizer" class="w-full h-32"></canvas>
+
+                        <div id="playerContainer" class="w-full px-6">
+                            <input type="range" id="seekBar" class="seek-bar" value="0" step="0.1" oninput="seek(this.value)">
+                            <div class="flex justify-between w-full mt-2 text-[9px] font-bold opacity-50">
+                                <span id="curTime">00:00</span>
+                                <span id="durTime">00:00</span>
+                            </div>
+                            <div class="flex justify-center mt-6">
+                                <button onclick="togglePlay(event)" id="playBtn" class="w-14 h-14 rounded-full border border-white/20 flex items-center justify-center hover:bg-white/10 transition-all">
+                                    <svg id="playIcon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.333-5.89a1.5 1.5 0 000-2.538L6.3 2.841z"></path>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -355,26 +362,14 @@
 
     <!-- Librerías Externas -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    
-    <!-- FIX CRÍTICO: Mock de SharedArrayBuffer ANTES de cargar FFmpeg -->
-    <script>
-        if (typeof SharedArrayBuffer === 'undefined') {
-            console.warn('SharedArrayBuffer no disponible. Aplicando parche para modo un solo hilo.');
-            // Creamos un mock inofensivo para que el cargador de la librería no explote prematuramente
-            window.SharedArrayBuffer = function() {
-                throw new Error("SharedArrayBuffer no soportado en este entorno. Usa el modo single-thread.");
-            };
-        }
-    </script>
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
 
     <script>
         const audio = document.getElementById('audioSource');
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
         let audioCtx, analyser, dataArray;
-        let isExporting = false;
 
+        // Sidebar logic
         function openSidebar(id) { 
             closeSidebar();
             document.getElementById(id).classList.add('active'); 
@@ -383,14 +378,16 @@
             document.querySelectorAll('.sidebar').forEach(s => s.classList.remove('active'));
         }
 
+        // Feature Toggles
         function toggleVisibility(id) {
             const el = document.getElementById(id);
             const btn = document.getElementById('btn-' + id);
             const isHidden = el.style.display === 'none';
             el.style.display = isHidden ? '' : 'none';
-            btn.classList.toggle('active', isHidden);
+            btn.classList.toggle('active', !isHidden);
         }
 
+        // Appearance
         function applyTheme(theme, btn) {
             document.querySelectorAll('.swatch-circle').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -440,19 +437,18 @@
             document.documentElement.style.setProperty('--bg-blur', document.getElementById('bgBlur').value + 'px');
         }
 
-        function updatePinFilters() {
-            document.documentElement.style.setProperty('--pin-brightness', document.getElementById('pinBrightness').value);
-            document.documentElement.style.setProperty('--pin-contrast', document.getElementById('pinContrast').value);
-            document.documentElement.style.setProperty('--pin-saturate', document.getElementById('pinSaturate').value);
-        }
-
         function updateDimensions() {
             const w = document.getElementById('inWidth').value || 380;
             const h = document.getElementById('inHeight').value || 675;
             const scale = document.getElementById('uiScale').value;
+            const radius = document.getElementById('inRadius').value;
+            const playerZoom = document.getElementById('inPlayerZoom').value;
+
             document.documentElement.style.setProperty('--pin-width', w + 'px');
             document.documentElement.style.setProperty('--pin-height', h + 'px');
             document.documentElement.style.setProperty('--pin-scale', scale);
+            document.documentElement.style.setProperty('--border-radius', radius + 'px');
+            document.documentElement.style.setProperty('--player-internal-zoom', playerZoom);
         }
 
         function updateUI() {
@@ -478,6 +474,7 @@
             document.getElementById('playBtn').style.color = document.getElementById('cPlayer').value;
         }
 
+        // File handling
         function handleFile(e, type) {
             const file = e.target.files[0];
             if(!file) return;
@@ -490,6 +487,7 @@
             if(type === 'web') document.getElementById('webBackground').style.backgroundImage = `url(${url})`;
         }
 
+        // Playback logic
         function togglePlay(e) {
             if(e && e.stopPropagation) e.stopPropagation();
             if(!audio.src) return;
@@ -522,6 +520,7 @@
         function seek(val) { if(audio.duration) audio.currentTime = (val/100)*audio.duration; }
         function formatTime(s) { const m=Math.floor(s/60), sc=Math.floor(s%60); return `${m.toString().padStart(2,'0')}:${sc.toString().padStart(2,'0')}`; }
 
+        // Animation Loop
         function draw() {
             requestAnimationFrame(draw);
             if(analyser) analyser.getByteFrequencyData(dataArray);
@@ -561,11 +560,18 @@
 
         window.onload = draw;
 
+        // Export PNG logic
+        async function applyExportMargin(active) {
+            document.documentElement.style.setProperty('--export-padding', active ? '8px' : '0px');
+            await new Promise(r => setTimeout(r, 150)); 
+        }
+
         async function downloadPinImage() {
             const pin = document.getElementById('pinFrame');
             const originalScale = document.documentElement.style.getPropertyValue('--pin-scale');
+            
             document.documentElement.style.setProperty('--pin-scale', '1');
-            await new Promise(r => setTimeout(r, 100));
+            await applyExportMargin(true);
 
             const canv = await html2canvas(pin, { 
                 useCORS: true, 
@@ -576,128 +582,12 @@
             });
 
             const link = document.createElement('a');
-            link.download = 'yv_pin.png';
+            link.download = `yv_studio_${Date.now()}.png`;
             link.href = canv.toDataURL('image/png');
             link.click();
+
             document.documentElement.style.setProperty('--pin-scale', originalScale);
-        }
-
-        // --- LÓGICA DE EXPORTACIÓN ---
-        const { createFFmpeg, fetchFile } = FFmpeg;
-
-        // Configuración específica para evitar SharedArrayBuffer
-        const ffmpeg = createFFmpeg({ 
-            log: true,
-            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-            mainName: 'main' // Ayuda a forzar el modo compatible
-        });
-
-        async function exportMp4() {
-            if(isExporting) return;
-            const btn = document.getElementById('btnMp4');
-            const status = document.getElementById('exportStatus');
-            
-            if (!audio.src) {
-                status.innerText = "Error: Carga un audio primero";
-                status.classList.add('active');
-                setTimeout(() => status.classList.remove('active'), 2000);
-                return;
-            }
-
-            try {
-                isExporting = true;
-                btn.disabled = true;
-                status.innerText = "CAPTURA DE VIDEO (10s)...";
-                status.classList.add('active');
-
-                // 1. Capturar fondo estático
-                const pin = document.getElementById('pinFrame');
-                const originalScale = document.documentElement.style.getPropertyValue('--pin-scale');
-                document.documentElement.style.setProperty('--pin-scale', '1');
-                await new Promise(r => setTimeout(r, 200));
-                
-                const captureCanv = await html2canvas(pin, { useCORS: true, scale: 2 });
-                const pinData = captureCanv.toDataURL('image/png');
-
-                // 2. Grabar visualizador
-                const stream = canvas.captureStream(30);
-                const recorder = new MediaRecorder(stream, { 
-                    mimeType: 'video/webm;codecs=vp9',
-                    videoBitsPerSecond: 3000000 
-                });
-                
-                const chunks = [];
-                recorder.ondataavailable = e => { if(e.data.size > 0) chunks.push(e.data); };
-                
-                recorder.onstop = async () => {
-                    status.innerText = "INICIALIZANDO RENDERIZADOR...";
-                    
-                    try {
-                        if (!ffmpeg.isLoaded()) {
-                            await ffmpeg.load();
-                        }
-
-                        const videoBlob = new Blob(chunks, { type: 'video/webm' });
-                        ffmpeg.FS('writeFile', 'vis.webm', await fetchFile(videoBlob));
-                        ffmpeg.FS('writeFile', 'bg.png', await fetchFile(pinData));
-                        
-                        // Cargar audio real
-                        const audioRes = await fetch(audio.src);
-                        const audioBuf = await audioRes.arrayBuffer();
-                        ffmpeg.FS('writeFile', 'audio.mp3', new Uint8Array(audioBuf));
-
-                        status.innerText = "PROCESANDO MP4 FINAL...";
-
-                        // Comando optimizado para un solo hilo
-                        await ffmpeg.run(
-                            '-loop', '1', '-i', 'bg.png',
-                            '-i', 'vis.webm',
-                            '-i', 'audio.mp3',
-                            '-filter_complex', '[1:v]scale=iw:ih[v1];[0:v][v1]overlay=0:0:shortest=1',
-                            '-pix_fmt', 'yuv420p',
-                            '-c:v', 'libx264',
-                            '-preset', 'ultrafast',
-                            '-threads', '1', // Forzamos 1 hilo explícitamente
-                            '-c:a', 'aac',
-                            '-shortest',
-                            'out.mp4'
-                        );
-
-                        const data = ffmpeg.FS('readFile', 'out.mp4');
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-                        downloadLink.download = 'YV_STUDIO_EXPORT.mp4';
-                        downloadLink.click();
-
-                        status.innerText = "¡EXPORTACIÓN COMPLETADA!";
-                    } catch (e) {
-                        console.error(e);
-                        status.innerText = "Error de Render (Revisa Consola)";
-                    } finally {
-                        setTimeout(() => status.classList.remove('active'), 3000);
-                        isExporting = false;
-                        btn.disabled = false;
-                        document.documentElement.style.setProperty('--pin-scale', originalScale);
-                    }
-                };
-
-                // Iniciar audio y grabación
-                if (audio.paused) togglePlay(); 
-                audio.currentTime = 0;
-                recorder.start();
-                
-                setTimeout(() => {
-                    recorder.stop();
-                    audio.pause();
-                }, 10000); 
-
-            } catch (err) {
-                console.error(err);
-                isExporting = false;
-                btn.disabled = false;
-                status.innerText = "Error en el proceso";
-                setTimeout(() => status.classList.remove('active'), 3000);
-            }
+            await applyExportMargin(false);
         }
     </script>
 </body>
