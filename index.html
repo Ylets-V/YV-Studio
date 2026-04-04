@@ -1,597 +1,555 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YV-STUDIO ULTIMATE v4.1</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&family=Outfit:wght@300;400;600&family=Bebas+Neue&family=Montserrat:wght@900&family=Playfair+Display:ital,wght@1,900&family=Space+Grotesk:wght@700&family=Inter:wght@400;900&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --glass-blur: 15px;
-            --bg-blur: 8px;
-            --bg-brightness: 0.3;
-            --border-radius: 20px;
-            --color-waves: #10b981;
-            --color-player: #ffffff;
-            --pin-width: 380px;
-            --pin-height: 675px;
-            --pin-brightness: 1;
-            --pin-contrast: 1;
-            --pin-saturate: 1;
-            --pin-scale: 1;
-            --wave-scale: 1;
-            --font-title: 'Syne', sans-serif;
-            --font-artist: 'Outfit', sans-serif;
-            --theme-bg: #000;
-            --panel-bg-left: rgba(0, 0, 0, 0.7);
-            --panel-bg-right: rgba(0, 0, 0, 0.7);
-            --player-scale: 1;
-            --player-internal-zoom: 1;
-            --export-padding: 0px;
-        }
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  doc, 
+  updateDoc,
+  deleteDoc,
+  arrayUnion,
+  arrayRemove,
+  increment
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  TwitterAuthProvider,
+  signInWithPopup,
+  signOut,
+  signInWithCustomToken
+} from 'firebase/auth';
+import { 
+  Play, 
+  Send, 
+  Mic, 
+  Pause,
+  Music,
+  Trash2,
+  Sun,
+  Moon,
+  Edit3,
+  X,
+  Heart,
+  Twitter,
+  LogOut,
+  MessageCircle,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Lock,
+  ChevronDown,
+  User,
+  Globe,
+  SkipForward,
+  SkipBack,
+  Volume2,
+  Upload,
+  Music2
+} from 'lucide-react';
 
-        input::-webkit-outer-spin-button,
-        input::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        input[type=number] { -moz-appearance: textfield; }
+// --- CONFIGURACIÓN FIREBASE ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const twitterProvider = new TwitterAuthProvider();
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'inefable-sounds-studio';
 
-        body { 
-            font-family: 'Outfit', sans-serif; 
-            background: var(--theme-bg);
-            color: white;
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            overflow: hidden;
-            transition: background 0.5s ease;
-        }
+const App = () => {
+  // --- ESTADOS ---
+  const [user, setUser] = useState(null);
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [notes, setNotes] = useState([]);
+  const [filter, setFilter] = useState('all'); 
+  const [theme, setTheme] = useState('light'); 
+  const [isCanvasVisible, setIsCanvasVisible] = useState(false);
+  const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
+  const [expandedNoteId, setExpandedNoteId] = useState(null);
+  const [commentText, setCommentText] = useState("");
+  const [showAuthWarning, setShowAuthWarning] = useState(false);
+  const [showCommentsId, setShowCommentsId] = useState(null);
+  
+  const [noteTitle, setNoteTitle] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [authorName, setAuthorName] = useState("");
+  const [alignment, setAlignment] = useState("center");
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [audioName, setAudioName] = useState("");
+  const [volume, setVolume] = useState(0.5);
+  const [isRecording, setIsRecording] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [actionTarget, setActionTarget] = useState(null); 
+  const [authKey, setAuthKey] = useState("");
+  const [authError, setAuthError] = useState(false);
 
-        .web-bg {
-            position: fixed;
-            inset: 0;
-            background-image: url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&q=80&w=1600');
-            background-size: cover;
-            background-position: center;
-            z-index: -1;
-            filter: brightness(var(--bg-brightness)) blur(var(--bg-blur));
-            transition: 0.5s ease;
-        }
+  const [playlist, setPlaylist] = useState([]);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  
+  const ambientAudioRef = useRef(new Audio());
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
 
-        .web-color-overlay {
-            position: fixed;
-            inset: 0;
-            background: var(--theme-bg);
-            z-index: -2;
-            transition: background 0.5s ease;
-        }
+  // --- LÓGICA DE TIEMPO ---
+  const isFromCurrentWeek = (timestamp) => {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const monday = new Date(now);
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    monday.setDate(diff);
+    monday.setHours(0, 0, 0, 0);
+    return date >= monday;
+  };
 
-        .sidebar {
-            position: fixed;
-            top: 20px;
-            bottom: 20px;
-            width: 360px;
-            backdrop-filter: blur(30px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 25px;
-            padding: 24px;
-            z-index: 1000;
-            transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), background 0.3s ease;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            overflow-y: auto;
-        }
-        .sidebar::-webkit-scrollbar { width: 0px; }
+  // --- AUTH & FIRESTORE ---
+  useEffect(() => {
+    // Aseguramos que al entrar no haya sesión vinculada automáticamente si es nueva visita
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u && !u.isAnonymous) {
+        setAuthorName(u.displayName);
+        setShowWelcome(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
-        #toolPanel { 
-            left: 20px; 
-            transform: translateX(calc(-100% - 40px)); 
-            background: var(--panel-bg-left);
-        }
-        #toolPanel.active { transform: translateX(0); }
+  useEffect(() => {
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'notes');
+    return onSnapshot(q, (snapshot) => {
+      const allNotes = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setNotes(allNotes.filter(n => isFromCurrentWeek(n.createdAt)));
+    }, (err) => console.error(err));
+  }, []);
+
+  const loginWithTwitter = async () => {
+    try {
+      const result = await signInWithPopup(auth, twitterProvider);
+      setUser(result.user);
+      setAuthorName(result.user.displayName);
+      setShowAuthWarning(false);
+      setShowWelcome(false);
+    } catch (error) { console.error(error); }
+  };
+
+  const skipLogin = async () => {
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+    }
+    setShowWelcome(false);
+  };
+
+  // --- LÓGICA DE AUDIO ---
+  useEffect(() => {
+    ambientAudioRef.current.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    if (playlist.length > 0 && playlist[currentTrackIndex]) {
+      ambientAudioRef.current.src = playlist[currentTrackIndex].url;
+      ambientAudioRef.current.volume = volume;
+      if (isPlaying) ambientAudioRef.current.play();
+    } else {
+      ambientAudioRef.current.pause();
+      setIsPlaying(false);
+    }
+    ambientAudioRef.current.onended = () => handleNextTrack();
+  }, [currentTrackIndex, playlist]);
+
+  const toggleMusic = () => {
+    if (playlist.length === 0) return;
+    if (isPlaying) {
+      ambientAudioRef.current.pause();
+    } else {
+      ambientAudioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleNextTrack = () => {
+    if (playlist.length === 0) return;
+    setCurrentTrackIndex((prev) => (prev + 1) % playlist.length);
+  };
+
+  const handlePrevTrack = () => {
+    if (playlist.length === 0) return;
+    setCurrentTrackIndex((prev) => (prev - 1 + playlist.length) % playlist.length);
+  };
+
+  const removeTrack = (e, id) => {
+    e.stopPropagation();
+    const newPlaylist = playlist.filter(t => t.id !== id);
+    if (playlist[currentTrackIndex]?.id === id) {
+      setIsPlaying(false);
+      ambientAudioRef.current.pause();
+      setCurrentTrackIndex(0);
+    }
+    setPlaylist(newPlaylist);
+  };
+
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files);
+    const newTracks = files.map(file => ({
+      id: Math.random().toString(36).substr(2, 9),
+      name: file.name.replace(/\.[^/.]+$/, ""),
+      url: URL.createObjectURL(file)
+    }));
+    setPlaylist(prev => [...prev, ...newTracks]);
+  };
+
+  // --- MOVIMIENTO ---
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNotes(prev => prev.map(n => {
+        if (isCanvasVisible || expandedNoteId === n.id) return n;
+        let nX = (n.x || 50) + (n.vx || 0);
+        let nY = (n.y || 50) + (n.vy || 0);
+        if (nX < 10 || nX > 90) n.vx *= -1;
+        if (nY < 15 || nY > 85) n.vy *= -1;
+        return { ...n, x: nX, y: nY };
+      }));
+    }, 60);
+    return () => clearInterval(interval);
+  }, [expandedNoteId, isCanvasVisible]);
+
+  // --- ACCIONES DE NOTAS ---
+  const handleLike = async (noteId, likedBy = []) => {
+    if (!user || user.isAnonymous) {
+      setShowAuthWarning(true);
+      return;
+    }
+    const noteRef = doc(db, 'artifacts', appId, 'public', 'data', 'notes', noteId);
+    const hasLiked = likedBy.includes(user.uid);
+    if (hasLiked) {
+      await updateDoc(noteRef, { likedBy: arrayRemove(user.uid), likes: increment(-1) });
+    } else {
+      await updateDoc(noteRef, { likedBy: arrayUnion(user.uid), likes: increment(1) });
+    }
+  };
+
+  const saveNote = async () => {
+    if (user?.isAnonymous || !user) {
+      setShowAuthWarning(true);
+      return;
+    }
+    if (!newNote.trim() || !keyword.trim() || !noteTitle.trim()) return;
+    const noteData = {
+      title: noteTitle,
+      text: newNote,
+      alignment: alignment,
+      author: authorName,
+      keyword: keyword.trim().toLowerCase(),
+      audioUrl: audioBlob || null,
+      updatedAt: Date.now(),
+      uid: user.uid,
+      userPhoto: user.photoURL || null
+    };
+    try {
+      if (editingNoteId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', editingNoteId), noteData);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), {
+          ...noteData,
+          comments: [],
+          likes: 0,
+          likedBy: [],
+          x: 20 + Math.random() * 60,
+          y: 20 + Math.random() * 60,
+          vx: (Math.random() - 0.5) * 0.08,
+          vy: (Math.random() - 0.5) * 0.08,
+          createdAt: Date.now()
+        });
+      }
+      resetForm();
+      setIsCanvasVisible(false);
+    } catch (err) { console.error(err); }
+  };
+
+  const resetForm = () => {
+    setNoteTitle(""); setNewNote(""); setKeyword(""); 
+    setAuthorName(user && !user.isAnonymous ? user.displayName : ""); setAlignment("center");
+    setAudioBlob(null); setAudioName(""); setEditingNoteId(null);
+  };
+
+  const verifyAction = async () => {
+    const targetNote = notes.find(n => n.id === actionTarget.id);
+    if (targetNote.keyword === authKey.trim().toLowerCase()) {
+      if (actionTarget.type === 'delete') {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', actionTarget.id));
+      } else {
+        setEditingNoteId(targetNote.id);
+        setNoteTitle(targetNote.title);
+        setNewNote(targetNote.text);
+        setAuthorName(targetNote.author);
+        setKeyword(targetNote.keyword);
+        setAlignment(targetNote.alignment);
+        setAudioBlob(targetNote.audioUrl);
+        setIsCanvasVisible(true);
+      }
+      setActionTarget(null); setAuthKey("");
+    } else setAuthError(true);
+  };
+
+  const displayedNotes = filter === 'all' ? notes : notes.filter(n => n.uid === user?.uid);
+  const isDark = theme === 'dark';
+
+  return (
+    <div className={`relative h-screen w-full flex items-center justify-center font-sans overflow-hidden p-3 md:p-6 transition-colors duration-1000 ${isDark ? 'bg-zinc-950' : 'bg-[#f0f9f4]'}`}>
+      
+      {/* FONDO NATURALEZA */}
+      <div className="absolute inset-0 z-0">
+        <div 
+          className="absolute inset-0 bg-cover bg-center transition-all duration-1000 scale-105" 
+          style={{ backgroundImage: `url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1920&q=80')`, filter: isDark ? 'brightness(0.2) saturate(0.5)' : 'none' }} 
+        />
+        <div className={`absolute inset-0 ${isDark ? 'bg-black/40' : 'bg-emerald-500/10'}`} />
+      </div>
+
+      {/* CONTENEDOR PRINCIPAL ULTRA-TRANSPARENTE */}
+      <div className={`relative z-10 w-full h-full max-w-6xl max-h-[92vh] backdrop-blur-[25px] border rounded-[3.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] overflow-hidden flex flex-col transition-all duration-700 ${isDark ? 'bg-zinc-900/40 border-white/10 text-white' : 'bg-white/30 border-white/40 text-zinc-900'}`}>
         
-        #stylePanel { 
-            right: 20px; 
-            transform: translateX(calc(100% + 40px)); 
-            background: var(--panel-bg-right);
-        }
-        #stylePanel.active { transform: translateX(0); }
+        {/* HEADER */}
+        <header className={`px-10 py-7 flex items-center justify-between border-b z-[60] ${isDark ? 'border-white/5 bg-black/10' : 'border-white/20 bg-white/10'}`}>
+          <div className="flex-1 flex justify-start gap-4">
+            <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="p-3.5 rounded-full bg-white/10 hover:bg-white/20 transition-all border border-white/10 shadow-lg text-emerald-600">
+              {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <div className="flex bg-white/10 p-1 rounded-[1.5rem] border border-white/10">
+                <button onClick={() => setFilter('all')} className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all ${filter === 'all' ? 'bg-emerald-700/80 text-white shadow-lg' : 'opacity-40 hover:opacity-100'}`}>
+                    <Globe size={14} /> Global
+                </button>
+                <button onClick={() => setFilter('mine')} className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all ${filter === 'mine' ? 'bg-emerald-700/80 text-white shadow-lg' : 'opacity-40 hover:opacity-100'}`}>
+                    <User size={14} /> Mis Notas
+                </button>
+            </div>
+          </div>
 
-        .edge-trigger { position: fixed; top: 0; bottom: 0; width: 40px; z-index: 999; cursor: pointer; }
-        .trigger-left { left: 0; }
-        .trigger-right { right: 0; }
+          <div className="flex flex-col items-center text-center">
+            <h1 className="text-3xl font-serif italic font-black tracking-tighter uppercase">INEFABLE SOUNDS</h1>
+            <p className="text-[7px] uppercase font-black tracking-[0.8em] opacity-40">Eco de la naturaleza</p>
+          </div>
 
-        .viewport { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+          <div className="flex-1 flex justify-end gap-4 items-center">
+            {(!user || user.isAnonymous) ? (
+              <button onClick={loginWithTwitter} className="hidden md:flex items-center gap-3 px-6 py-3 rounded-full bg-emerald-900/80 text-white hover:bg-black transition-all text-[10px] font-black uppercase tracking-widest shadow-lg">
+                <Twitter size={14} fill="currentColor" /> Vincular X
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 bg-white/10 p-2 pr-5 rounded-full border border-white/10">
+                <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} className="w-9 h-9 rounded-full border-2 border-emerald-500/50 shadow-md" />
+                <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-500 transition-colors"><LogOut size={14}/></button>
+              </div>
+            )}
+            
+            <button 
+              onClick={() => (user?.isAnonymous || !user ? setShowAuthWarning(true) : setIsCanvasVisible(true))} 
+              className={`px-7 py-3 rounded-full font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center gap-2 ${user?.isAnonymous || !user ? 'bg-zinc-800/40 text-white/50 border border-white/10' : 'bg-emerald-800 text-white hover:translate-y-[-2px] active:translate-y-0'}`}
+            >
+              {(user?.isAnonymous || !user) && <Lock size={12}/>}
+              + Nueva Nota
+            </button>
+          </div>
+        </header>
 
-        #scaleWrapper { transform: scale(var(--pin-scale)); transition: transform 0.2s ease; }
+        {/* CANVAS DE NOTAS */}
+        <div className="relative flex-1 overflow-hidden">
+          <div className="absolute inset-0 z-10">
+            {displayedNotes.map((note) => {
+              const isExpanded = expandedNoteId === note.id;
+              const hasLiked = note.likedBy?.includes(user?.uid);
+              
+              return (
+                <div key={note.id} className={`absolute transition-all duration-[2500ms] ${isExpanded ? 'z-[100]' : 'z-20'}`} style={{ left: isExpanded ? '50%' : `${note.x}%`, top: isExpanded ? '50%' : `${note.y}%`, transform: `translate(-50%, -50%)` }}>
+                  <div onClick={() => !isExpanded && setExpandedNoteId(note.id)} className={`group relative p-8 rounded-[3rem] shadow-2xl border transition-all ${isExpanded ? 'w-[90vw] max-w-lg max-h-[80vh] overflow-y-auto cursor-default backdrop-blur-3xl bg-opacity-90' : 'min-w-[170px] max-w-[240px] cursor-pointer hover:scale-110 backdrop-blur-xl bg-opacity-30'} ${isDark ? 'bg-zinc-900/60 border-white/10' : 'bg-white/40 border-white/50'}`}>
+                    {isExpanded && <button onClick={(e) => { e.stopPropagation(); setExpandedNoteId(null); setShowCommentsId(null); }} className="absolute top-8 right-8 opacity-30 hover:opacity-100 transition-opacity"><X size={22}/></button>}
+                    
+                    <div className="mb-5 text-center">
+                        <h3 className={`font-serif italic leading-tight mb-2 ${isExpanded ? 'text-4xl font-black' : 'text-base font-bold truncate'}`}>{note.title}</h3>
+                        <div className="flex items-center justify-center gap-2 opacity-40">
+                            <span className="text-[8px] font-black uppercase tracking-[0.3em]">Por {note.author}</span>
+                        </div>
+                    </div>
 
-        .pin-wrapper {
-            position: relative;
-            width: var(--pin-width);
-            height: var(--pin-height);
-            background-image: url('https://images.unsplash.com/photo-1542273917363-3b1817f69a2d?auto=format&fit=crop&q=80&w=800');
-            background-size: cover;
-            background-position: center;
-            border-radius: var(--border-radius);
-            box-shadow: 0 40px 100px rgba(0,0,0,0.8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            filter: brightness(var(--pin-brightness)) contrast(var(--pin-contrast)) saturate(var(--pin-saturate));
-        }
+                    <div className={`overflow-hidden transition-all duration-700 ${isExpanded ? 'opacity-100 mt-6' : 'max-h-0 opacity-0'}`}>
+                      <p className="text-2xl font-serif italic mb-10 leading-relaxed opacity-90" style={{ textAlign: note.alignment }}>"{note.text}"</p>
+                      
+                      <div className="flex items-center gap-4 mb-10">
+                        <button onClick={(e) => { e.stopPropagation(); handleLike(note.id, note.likedBy); }} className={`flex-1 flex items-center justify-center gap-3 py-5 rounded-3xl transition-all ${hasLiked ? 'bg-red-500 text-white shadow-lg' : 'bg-black/5 hover:bg-black/10'}`}>
+                            <Heart size={18} fill={hasLiked ? "white" : "none"} />
+                            <span className="text-[12px] font-black">{note.likes || 0}</span>
+                        </button>
+                      </div>
 
-        .glass-overlay {
-            position: absolute;
-            inset: calc(15px + var(--export-padding)); 
-            background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(var(--glass-blur));
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: calc(var(--border-radius) - 5px);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            padding: 40px 20px;
-            z-index: 2;
-            transition: inset 0.2s ease;
-        }
-
-        #internalZoomContainer {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            transform: scale(var(--player-internal-zoom));
-            transition: transform 0.2s ease;
-        }
-
-        /* MODIFICACIÓN: Player Estático */
-        #playerContainer {
-            transition: none; /* Eliminamos la transición para que no vibre */
-            transform: none !important; /* Forzamos estado estático */
-        }
-
-        .input-group label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: rgba(255,255,255,0.7); margin-bottom: 6px; display: block; font-weight: 700; }
-        .field { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); padding: 10px 14px; border-radius: 12px; color: white; font-size: 13px; width: 100%; outline: none; transition: 0.2s; }
-        .field:focus { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.3); }
-        
-        .btn-glass { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 12px; font-size: 10px; font-weight: 600; cursor: pointer; color: white; transition: 0.2s; text-align: center; width: 100%; }
-        .btn-glass:hover { background: rgba(255,255,255,0.1); }
-        .btn-primary { background: #fff; color: #000; border: none; font-weight: 800; }
-
-        .swatch-circle { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,0.1); transition: 0.3s; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
-        .swatch-circle.active { border-color: white; transform: scale(1.1); }
-        .swatch-picker { position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
-
-        @keyframes rainbow-rotate {
-            from { filter: hue-rotate(0deg); }
-            to { filter: hue-rotate(360deg); }
-        }
-        #customSwatch {
-            background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
-            animation: rainbow-rotate 3s linear infinite;
-        }
-
-        .toggle-btn { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); height: 40px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.4); }
-        .toggle-btn.active { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); color: white; }
-
-        .seek-bar { width: 100%; height: 2px; background: rgba(255,255,255,0.1); appearance: none; outline: none; background-image: linear-gradient(var(--color-player), var(--color-player)); background-size: 0% 100%; background-repeat: no-repeat; cursor: pointer; }
-        .seek-bar::-webkit-slider-thumb { appearance: none; width: 8px; height: 8px; background: var(--color-player); border-radius: 50%; }
-
-        input[type="color"] { -webkit-appearance: none; border: none; width: 100%; height: 25px; cursor: pointer; background: none; padding: 0; }
-        input[type="color"]::-webkit-color-swatch { border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); }
-    </style>
-</head>
-<body>
-
-    <div class="web-color-overlay"></div>
-    <div class="web-bg" id="webBackground"></div>
-
-    <div class="edge-trigger trigger-left" onmouseenter="openSidebar('toolPanel')"></div>
-    <div class="edge-trigger trigger-right" onmouseenter="openSidebar('stylePanel')"></div>
-
-    <!-- PANEL IZQUIERDO: HERRAMIENTAS -->
-    <aside class="sidebar" id="toolPanel">
-        <div class="mb-4 text-center">
-            <h1 class="text-3xl font-black italic tracking-tighter">YV-STUDIO</h1>
-            <p class="text-[10px] opacity-50 uppercase tracking-widest">Ultimate Editor v4.1</p>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-            <button class="btn-glass" onclick="document.getElementById('fAudio').click()">CARGAR AUDIO</button>
-            <button class="btn-glass" onclick="document.getElementById('fPin').click()">CARGAR PORTADA</button>
-            <input type="file" id="fAudio" class="hidden" accept="audio/*" onchange="handleFile(event, 'audio')">
-            <input type="file" id="fPin" class="hidden" accept="image/*" onchange="handleFile(event, 'pin')">
-        </div>
-
-        <div class="input-group">
-            <label>Textos & Fuentes</label>
-            <div class="grid grid-cols-2 gap-3">
-                <div class="space-y-2">
-                    <span class="text-[8px] opacity-40 font-bold uppercase">TÍTULO</span>
-                    <input type="text" id="inTitle" class="field" value="Track Title" oninput="updateUI()">
-                    <span class="text-[8px] opacity-40 font-bold uppercase">FUENTE TÍTULO</span>
-                    <input type="text" id="manualFontT" class="field !text-[10px]" placeholder="Ej: Syne" oninput="updateUI()">
+                      {user?.uid === note.uid && (
+                        <div className="flex items-center justify-center gap-5 mt-8 pt-8 border-t border-black/5">
+                            <button onClick={(e) => { e.stopPropagation(); setActionTarget({ id: note.id, type: 'edit' }); }} className="p-4 opacity-40 hover:opacity-100 hover:bg-emerald-500/10 rounded-full transition-all"><Edit3 size={18} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setActionTarget({ id: note.id, type: 'delete' }); }} className="p-4 opacity-40 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-all"><Trash2 size={18} /></button>
+                        </div>
+                      )}
+                    </div>
+                    {!isExpanded && <div className="flex justify-center mt-4 opacity-20 group-hover:opacity-100 transition-opacity"><ChevronDown size={16} /></div>}
+                  </div>
                 </div>
-                <div class="space-y-2">
-                    <span class="text-[8px] opacity-40 font-bold uppercase">ARTISTA</span>
-                    <input type="text" id="inArtist" class="field" value="Artist Name" oninput="updateUI()">
-                    <span class="text-[8px] opacity-40 font-bold uppercase">FUENTE ARTISTA</span>
-                    <input type="text" id="manualFontA" class="field !text-[10px]" placeholder="Ej: Outfit" oninput="updateUI()">
-                </div>
-            </div>
-            <div class="grid grid-cols-2 gap-3 mt-3">
-                <div><span class="text-[8px] opacity-40 font-bold uppercase">TAMAÑO TÍT</span><input type="number" id="tsTitle" class="field" value="48" oninput="updateUI()"></div>
-                <div><span class="text-[8px] opacity-40 font-bold uppercase">TAMAÑO ART</span><input type="number" id="tsArtist" class="field" value="10" oninput="updateUI()"></div>
-            </div>
-            <div class="mt-3">
-                <button class="btn-glass !py-2 !text-[8px]" onclick="document.getElementById('fileFontCustom').click()">SUBIR ARCHIVO .OTF / .TTF</button>
-                <input type="file" id="fileFontCustom" class="hidden" accept=".otf,.ttf" onchange="handleCustomFontFile(event)">
-            </div>
+              );
+            })}
+          </div>
         </div>
 
-        <div class="input-group">
-            <label>Forma & Estructura</label>
-            <div class="space-y-3">
-                <div>
-                    <span class="text-[8px] opacity-40 font-bold uppercase">REDONDEAR ESQUINAS</span>
-                    <input type="range" id="inRadius" min="0" max="100" value="20" oninput="updateDimensions()" class="w-full accent-white">
-                </div>
-                <div>
-                    <span class="text-[8px] opacity-40 font-bold uppercase">ZOOM PLAYER (AGRANDAR)</span>
-                    <input type="range" id="inPlayerZoom" min="0.5" max="2" step="0.05" value="1" oninput="updateDimensions()" class="w-full accent-white">
-                </div>
-            </div>
-        </div>
-
-        <div class="input-group">
-            <label>Dimensiones Canvas & Zoom Vista</label>
-            <div class="grid grid-cols-2 gap-3 mb-3">
-                <input type="number" id="inWidth" class="field" value="380" oninput="updateDimensions()">
-                <input type="number" id="inHeight" class="field" value="675" oninput="updateDimensions()">
-            </div>
-            <input type="range" id="uiScale" min="0.3" max="1.5" step="0.05" value="1" oninput="updateDimensions()" class="w-full accent-white">
-        </div>
-    </aside>
-
-    <!-- PANEL DERECHO: ESTILOS -->
-    <aside class="sidebar" id="stylePanel">
-        <div class="mb-4 text-center">
-            <h1 class="text-3xl font-black italic tracking-tighter">ESTILOS</h1>
-        </div>
-
-        <div class="input-group">
-            <label>Visibilidad (Elementos)</label>
-            <div class="grid grid-cols-4 gap-2">
-                <div id="btn-outTitle" class="toggle-btn active" onclick="toggleVisibility('outTitle')">TIT</div>
-                <div id="btn-outArtist" class="toggle-btn active" onclick="toggleVisibility('outArtist')">ART</div>
-                <div id="btn-visualizer" class="toggle-btn active" onclick="toggleVisibility('visualizer')">WAV</div>
-                <div id="btn-playerContainer" class="toggle-btn active" onclick="toggleVisibility('playerContainer')">PLY</div>
-            </div>
-        </div>
-
-        <div class="input-group">
-            <label>Escalado Onda</label>
-            <input type="range" id="waveScale" min="0.2" max="5" step="0.1" value="1" oninput="updateUI()" class="w-full accent-white">
-        </div>
-
-        <div class="input-group">
-            <label>Colores Individuales</label>
-            <div class="grid grid-cols-4 gap-3">
-                <input type="color" id="cTitle" value="#ffffff" oninput="updateUI()">
-                <input type="color" id="cArtist" value="#ffffff" oninput="updateUI()">
-                <input type="color" id="cWaves" value="#10b981" oninput="updateUI()">
-                <input type="color" id="cPlayer" value="#ffffff" oninput="updateUI()">
-            </div>
-        </div>
-
-        <div class="input-group">
-            <label>Fondo Web & Opacidad Paneles</label>
-            <div class="flex justify-between mb-4">
-                <div class="swatch-circle bg-black active" onclick="applyTheme('dark', this)"></div>
-                <div class="swatch-circle bg-white" onclick="applyTheme('light', this)"></div>
-                <div class="swatch-circle bg-emerald-600" onclick="applyTheme('green', this)"></div>
-                <div class="swatch-circle" id="customSwatch">
-                    <input type="color" class="swatch-picker" id="customBgColor" oninput="applyCustomColor(this.value)">
-                </div>
-            </div>
-            <div class="space-y-3">
-                <button class="btn-glass !py-2 !text-[10px]" onclick="document.getElementById('fWeb').click()">CARGAR IMAGEN WEB</button>
-                <input type="file" id="fWeb" class="hidden" accept="image/*" onchange="handleFile(event, 'web')">
+        {/* FOOTER PLAYER */}
+        <footer className={`px-12 py-8 border-t flex flex-col items-center gap-5 z-[60] ${isDark ? 'bg-black/30 border-white/5' : 'bg-white/10 border-white/20'}`}>
+            <div className="w-full max-w-4xl flex items-center justify-between gap-10">
                 
-                <div class="grid grid-cols-2 gap-3">
-                    <div><span class="text-[8px] opacity-40 font-bold uppercase">BRILLO</span><input type="range" id="bgBrightness" min="0" max="1" step="0.05" value="0.3" oninput="updateWebAdjustments()" class="w-full accent-white"></div>
-                    <div><span class="text-[8px] opacity-40 font-bold uppercase">DESENFOQUE</span><input type="range" id="bgBlur" min="0" max="50" value="8" oninput="updateWebAdjustments()" class="w-full accent-white"></div>
+                {/* BOTÓN MÚSICA Y BIBLIOTECA POSICIONADA */}
+                <div className="flex-1 flex items-center gap-5 relative">
+                    <button onClick={() => setIsPlaylistOpen(!isPlaylistOpen)} className={`p-5 rounded-[2rem] transition-all shadow-xl ${isPlaylistOpen ? 'bg-emerald-900 text-white scale-110' : 'bg-white/30 text-emerald-900 hover:bg-white/50 border border-white/30'}`}>
+                        <Music size={24} />
+                        {playlist.length > 0 && <span className="absolute -top-1 -right-1 w-6 h-6 bg-emerald-600 text-white text-[10px] rounded-full flex items-center justify-center border-2 border-white font-black">{playlist.length}</span>}
+                    </button>
+                    
+                    <div className="hidden sm:block overflow-hidden">
+                        <p className="text-[8px] font-black opacity-30 uppercase tracking-[0.4em] mb-1">En el aire</p>
+                        <p className="text-sm font-serif italic font-black truncate max-w-[180px]">
+                            {playlist[currentTrackIndex]?.name || "Estudio en calma..."}
+                        </p>
+                    </div>
+
+                    {/* BIBLIOTECA DESPLEGABLE SOBRE EL BOTÓN */}
+                    {isPlaylistOpen && (
+                        <div className={`absolute bottom-24 left-0 w-80 p-8 rounded-[2.5rem] border shadow-[0_30px_60px_-10px_rgba(0,0,0,0.3)] animate-in backdrop-blur-3xl z-[110] ${isDark ? 'bg-zinc-950/90 border-white/10' : 'bg-white/80 border-white/60'}`}>
+                            <div className="flex items-center justify-between mb-6">
+                                <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40">Tus Sonidos</h4>
+                                <button onClick={() => setIsPlaylistOpen(false)} className="p-2 opacity-40 hover:opacity-100"><X size={16}/></button>
+                            </div>
+                            
+                            <div className="space-y-2 max-h-56 overflow-y-auto pr-2 custom-scrollbar mb-6">
+                                {playlist.length === 0 ? (
+                                    <p className="text-center py-10 text-[11px] font-serif italic opacity-30">Silencio absoluto</p>
+                                ) : (
+                                    playlist.map((track, idx) => (
+                                        <div key={track.id} className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer border ${currentTrackIndex === idx ? 'bg-emerald-600/20 text-emerald-700 border-emerald-500/30' : 'bg-black/5 border-transparent hover:bg-black/10'}`} onClick={() => setCurrentTrackIndex(idx)}>
+                                            <span className="text-[10px] opacity-40">{idx + 1}</span>
+                                            <span className="text-xs font-bold truncate flex-1 italic">{track.name}</span>
+                                            <button onClick={(e) => removeTrack(e, track.id)} className="p-1 opacity-0 group-hover:opacity-100 text-red-500"><Trash2 size={14}/></button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            
+                            <label className="flex items-center justify-center gap-3 py-4 border-2 border-dashed border-emerald-500/20 rounded-2xl cursor-pointer hover:bg-emerald-500/5 transition-all text-emerald-700 font-black text-[9px] uppercase tracking-widest">
+                                <Upload size={16} /> <span>Añadir Audio</span>
+                                <input type="file" className="hidden" accept="audio/*" multiple onChange={handleFileUpload} />
+                            </label>
+                        </div>
+                    )}
                 </div>
-                <hr class="opacity-10 my-1">
-                <div class="grid grid-cols-2 gap-3">
-                    <div><span class="text-[8px] opacity-40 font-bold uppercase">OPACIDAD IZQ</span><input type="range" id="opLeft" min="0" max="1" step="0.05" value="0.7" oninput="updatePanelOpacity()" class="w-full accent-white"></div>
-                    <div><span class="text-[8px] opacity-40 font-bold uppercase">OPACIDAD DER</span><input type="range" id="opRight" min="0" max="1" step="0.05" value="0.7" oninput="updatePanelOpacity()" class="w-full accent-white"></div>
+
+                {/* CONTROLES DE REPRODUCCIÓN */}
+                <div className="flex items-center gap-8">
+                    <button onClick={handlePrevTrack} className="p-2 opacity-30 hover:opacity-100 transition-all"><SkipBack size={24}/></button>
+                    <button onClick={toggleMusic} className={`w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-emerald-950 text-white' : 'bg-emerald-600 text-white'}`}>
+                        {isPlaying ? <Pause size={28} fill="white" /> : <Play size={28} fill="white" className="ml-1" />}
+                    </button>
+                    <button onClick={handleNextTrack} className="p-2 opacity-30 hover:opacity-100 transition-all"><SkipForward size={24}/></button>
+                </div>
+
+                {/* VOLUMEN */}
+                <div className="flex-1 flex justify-end">
+                   <div className="flex items-center gap-4 bg-white/20 px-6 py-4 rounded-full border border-white/20 shadow-inner">
+                        <Volume2 size={18} className="opacity-30" />
+                        <input 
+                            type="range" 
+                            min="0" 
+                            max="1" 
+                            step="0.01" 
+                            value={volume} 
+                            onChange={(e) => setVolume(parseFloat(e.target.value))}
+                            className="w-24 accent-emerald-600 h-1 cursor-pointer bg-white/20 rounded-full"
+                        />
+                   </div>
                 </div>
             </div>
-        </div>
+        </footer>
 
-        <div class="input-group">
-            <label>Cristalizado (Blur Pin)</label>
-            <input type="range" id="inBlurPx" min="0" max="60" value="15" oninput="updateUI()" class="w-full accent-white">
-        </div>
-
-        <div class="mt-auto">
-            <button class="btn-glass btn-primary py-4 text-[11px]" onclick="downloadPinImage()">GUARDAR DISEÑO (PNG)</button>
-        </div>
-    </aside>
-
-    <main class="viewport" id="mainViewport" onclick="closeSidebar()">
-        <div id="scaleWrapper">
-            <div class="pin-wrapper" id="pinFrame">
-                <div class="glass-overlay" id="glassLayer">
-                    <div id="internalZoomContainer">
-                        <div class="text-center w-full px-4">
-                            <h2 id="outTitle" class="font-black uppercase tracking-tighter leading-tight mb-3">Track Title</h2>
-                            <p id="outArtist" class="tracking-[5px] uppercase opacity-70">Artist Name</p>
-                        </div>
-
-                        <canvas id="visualizer" class="w-full h-32"></canvas>
-
-                        <!-- COMPONENTES SOLICITADOS COMO ESTÁTICOS -->
-                        <div id="playerContainer" class="w-full px-6">
-                            <input type="range" id="seekBar" class="seek-bar" value="0" step="0.1" oninput="seek(this.value)">
-                            <div class="flex justify-between w-full mt-2 text-[9px] font-bold opacity-50">
-                                <span id="curTime">00:00</span>
-                                <span id="durTime">00:00</span>
-                            </div>
-                            <div class="flex justify-center mt-6">
-                                <button onclick="togglePlay(event)" id="playBtn" class="w-14 h-14 rounded-full border border-white/20 flex items-center justify-center hover:bg-white/10 transition-all">
-                                    <svg id="playIcon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.333-5.89a1.5 1.5 0 000-2.538L6.3 2.841z"></path>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
+        {/* OVERLAY DE BIENVENIDA */}
+        {showWelcome && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 backdrop-blur-[45px] bg-black/30">
+                <div className={`relative w-full max-w-sm p-14 rounded-[4rem] border shadow-[0_60px_100px_-20px_rgba(0,0,0,0.5)] text-center animate-in ${isDark ? 'bg-zinc-950/80 border-white/10' : 'bg-white/80 border-white/40'}`}>
+                    <h2 className="text-4xl font-serif italic font-black mb-4">Inefable</h2>
+                    <p className="text-sm opacity-60 mb-12 font-serif italic">Conecta tu cuenta de X para dejar tu eco en este bosque digital.</p>
+                    <div className="space-y-4">
+                        <button onClick={loginWithTwitter} className="w-full py-6 bg-black text-white rounded-3xl flex items-center justify-center gap-4 font-black uppercase text-[10px] tracking-[0.3em] shadow-2xl hover:scale-105 transition-all">
+                            <Twitter size={18} fill="currentColor" /> Vincular X
+                        </button>
+                        <button onClick={skipLogin} className="w-full py-6 bg-white/20 text-zinc-800 rounded-3xl font-black uppercase text-[9px] tracking-[0.2em] border border-black/10 hover:bg-white/40">
+                            Explorar invitado
+                        </button>
                     </div>
                 </div>
             </div>
-        </div>
-    </main>
+        )}
 
-    <audio id="audioSource" crossorigin="anonymous"></audio>
+        {/* MODAL NUEVA NOTA */}
+        {isCanvasVisible && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-2xl" onClick={() => setIsCanvasVisible(false)} />
+            <div className={`relative w-full max-w-xl p-14 rounded-[4rem] border shadow-2xl animate-in ${isDark ? 'bg-zinc-900/90 border-white/10' : 'bg-white/90 border-white/40'}`}>
+              <input type="text" placeholder="Título del eco..." value={noteTitle} onChange={e => setNoteTitle(e.target.value)} className="w-full bg-transparent text-4xl font-serif italic mb-8 outline-none font-black" style={{ textAlign: alignment }} />
+              <textarea value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Escribe aquí..." className="w-full bg-transparent text-2xl font-serif italic outline-none resize-none mb-10 h-40 opacity-80" style={{ textAlign: alignment }} />
+              
+              <div className="flex items-center gap-5 mb-10">
+                <input type="password" placeholder="Clave de edición..." value={keyword} onChange={e => setKeyword(e.target.value)} className="flex-1 bg-white/10 border-2 border-black/5 rounded-3xl px-7 py-5 text-sm outline-none text-center font-bold tracking-widest" />
+              </div>
 
-    <!-- Librerías Externas -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+              <button onClick={saveNote} className="w-full py-7 rounded-[2.5rem] font-black text-[11px] uppercase tracking-[0.5em] bg-emerald-900 text-white hover:bg-black shadow-2xl transition-all">Publicar Recuerdo</button>
+            </div>
+          </div>
+        )}
 
-    <script>
-        const audio = document.getElementById('audioSource');
-        const canvas = document.getElementById('visualizer');
-        const ctx = canvas.getContext('2d');
-        let audioCtx, analyser, dataArray;
+        {/* AVISO VINCULACIÓN NECESARIA */}
+        {showAuthWarning && (
+           <div className="fixed inset-0 z-[400] flex items-center justify-center p-6">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-3xl" onClick={() => setShowAuthWarning(false)} />
+                <div className={`relative w-full max-w-xs p-12 rounded-[3.5rem] shadow-2xl animate-in text-center ${isDark ? 'bg-zinc-950 border border-white/10' : 'bg-white/90 border border-white/40'}`}>
+                    <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-8">
+                        <Lock size={28} className="text-red-500" />
+                    </div>
+                    <h2 className="text-2xl font-serif italic font-black mb-4">Acceso Limitado</h2>
+                    <p className="text-xs opacity-50 mb-10 font-serif italic">Debes vincular tu cuenta de X para poder publicar notas o dar likes.</p>
+                    <button onClick={loginWithTwitter} className="w-full py-5 bg-black text-white rounded-2xl flex items-center justify-center gap-3 font-black uppercase text-[9px] tracking-widest shadow-xl">
+                        <Twitter size={16} fill="currentColor" /> Conectar X
+                    </button>
+                </div>
+           </div>
+        )}
 
-        // Sidebar logic
-        function openSidebar(id) { 
-            closeSidebar();
-            document.getElementById(id).classList.add('active'); 
-        }
-        function closeSidebar() { 
-            document.querySelectorAll('.sidebar').forEach(s => s.classList.remove('active'));
-        }
+        {/* VERIFICACIÓN CLAVE */}
+        {actionTarget && (
+          <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/80 backdrop-blur-xl p-6">
+            <div className={`w-full max-w-xs border rounded-[3rem] p-10 shadow-2xl animate-in bg-white/90`}>
+              <p className="text-[9px] mb-6 opacity-40 uppercase font-black tracking-widest text-center">Clave de autoría</p>
+              <input type="password" value={authKey} onChange={e => setAuthKey(e.target.value)} className="w-full border-2 rounded-2xl px-6 py-4 text-center text-sm mb-6 outline-none" />
+              <button onClick={verifyAction} className="w-full py-5 bg-black text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">Verificar</button>
+            </div>
+          </div>
+        )}
+      </div>
 
-        // Feature Toggles
-        function toggleVisibility(id) {
-            const el = document.getElementById(id);
-            const btn = document.getElementById('btn-' + id);
-            const isHidden = el.style.display === 'none';
-            el.style.display = isHidden ? '' : 'none';
-            btn.classList.toggle('active', !isHidden);
-        }
+      <style dangerouslySetInnerHTML={{ __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,400;1,700;1,900&family=Inter:wght@400;700;900&display=swap');
+        .font-serif { font-family: 'Playfair Display', serif; }
+        .font-sans { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 10px; }
+        @keyframes fade-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        .animate-in { animation: fade-in 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+      `}} />
+    </div>
+  );
+};
 
-        // Appearance
-        function applyTheme(theme, btn) {
-            document.querySelectorAll('.swatch-circle').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const root = document.documentElement;
-            const themes = {
-                dark: { bg: '#000', op: 0.7 },
-                light: { bg: '#f1f5f9', op: 0.4 },
-                green: { bg: '#064e3b', op: 0.6 }
-            };
-            root.style.setProperty('--theme-bg', themes[theme].bg);
-            document.getElementById('opLeft').value = themes[theme].op;
-            document.getElementById('opRight').value = themes[theme].op;
-            updatePanelOpacity();
-        }
-
-        function applyCustomColor(color) {
-            document.querySelectorAll('.swatch-circle').forEach(b => b.classList.remove('active'));
-            document.getElementById('customSwatch').classList.add('active');
-            document.documentElement.style.setProperty('--theme-bg', color);
-        }
-
-        function updatePanelOpacity() {
-            const opL = document.getElementById('opLeft').value;
-            const opR = document.getElementById('opRight').value;
-            document.documentElement.style.setProperty('--panel-bg-left', `rgba(0, 0, 0, ${opL})`);
-            document.documentElement.style.setProperty('--panel-bg-right', `rgba(0, 0, 0, ${opR})`);
-        }
-
-        function handleCustomFontFile(e) {
-            const file = e.target.files[0];
-            if(!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const fontName = 'UserFont_' + Date.now();
-                const fontFace = new FontFace(fontName, event.target.result);
-                fontFace.load().then(loadedFace => {
-                    document.fonts.add(loadedFace);
-                    document.getElementById('manualFontT').value = fontName;
-                    updateUI();
-                });
-            };
-            reader.readAsArrayBuffer(file);
-        }
-
-        function updateWebAdjustments() {
-            document.documentElement.style.setProperty('--bg-brightness', document.getElementById('bgBrightness').value);
-            document.documentElement.style.setProperty('--bg-blur', document.getElementById('bgBlur').value + 'px');
-        }
-
-        function updateDimensions() {
-            const w = document.getElementById('inWidth').value || 380;
-            const h = document.getElementById('inHeight').value || 675;
-            const scale = document.getElementById('uiScale').value;
-            const radius = document.getElementById('inRadius').value;
-            const playerZoom = document.getElementById('inPlayerZoom').value;
-
-            document.documentElement.style.setProperty('--pin-width', w + 'px');
-            document.documentElement.style.setProperty('--pin-height', h + 'px');
-            document.documentElement.style.setProperty('--pin-scale', scale);
-            document.documentElement.style.setProperty('--border-radius', radius + 'px');
-            document.documentElement.style.setProperty('--player-internal-zoom', playerZoom);
-        }
-
-        function updateUI() {
-            const outT = document.getElementById('outTitle');
-            const outA = document.getElementById('outArtist');
-            const manualT = document.getElementById('manualFontT').value;
-            const manualA = document.getElementById('manualFontA').value;
-            
-            outT.innerText = document.getElementById('inTitle').value;
-            outT.style.fontSize = document.getElementById('tsTitle').value + 'px';
-            outT.style.color = document.getElementById('cTitle').value;
-            if(manualT) outT.style.fontFamily = manualT + ', sans-serif';
-            
-            outA.innerText = document.getElementById('inArtist').value;
-            outA.style.fontSize = document.getElementById('tsArtist').value + 'px';
-            outA.style.color = document.getElementById('cArtist').value;
-            if(manualA) outA.style.fontFamily = manualA + ', sans-serif';
-
-            document.documentElement.style.setProperty('--wave-scale', document.getElementById('waveScale').value);
-            document.documentElement.style.setProperty('--color-waves', document.getElementById('cWaves').value);
-            document.documentElement.style.setProperty('--color-player', document.getElementById('cPlayer').value);
-            document.documentElement.style.setProperty('--glass-blur', document.getElementById('inBlurPx').value + 'px');
-            document.getElementById('playBtn').style.color = document.getElementById('cPlayer').value;
-        }
-
-        // File handling
-        function handleFile(e, type) {
-            const file = e.target.files[0];
-            if(!file) return;
-            const url = URL.createObjectURL(file);
-            if(type === 'audio') {
-                audio.src = url;
-                audio.onloadedmetadata = () => document.getElementById('durTime').innerText = formatTime(audio.duration);
-            }
-            if(type === 'pin') document.getElementById('pinFrame').style.backgroundImage = `url(${url})`;
-            if(type === 'web') document.getElementById('webBackground').style.backgroundImage = `url(${url})`;
-        }
-
-        // Playback logic
-        function togglePlay(e) {
-            if(e && e.stopPropagation) e.stopPropagation();
-            if(!audio.src) return;
-            if(!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioCtx.createAnalyser();
-                const source = audioCtx.createMediaElementSource(audio);
-                source.connect(analyser);
-                analyser.connect(audioCtx.destination);
-                analyser.fftSize = 256;
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
-            }
-            if(audio.paused) {
-                audio.play();
-                document.getElementById('playIcon').innerHTML = '<path d="M5 4h3v12H5V4zm7 0h3v12h-3V4z"/>';
-            } else {
-                audio.pause();
-                document.getElementById('playIcon').innerHTML = '<path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.333-5.89a1.5 1.5 0 000-2.538L6.3 2.841z"></path>';
-            }
-        }
-
-        audio.ontimeupdate = () => {
-            if(!audio.duration) return;
-            const prog = (audio.currentTime/audio.duration)*100;
-            document.getElementById('seekBar').value = prog || 0;
-            document.getElementById('seekBar').style.backgroundSize = `${prog}% 100%`;
-            document.getElementById('curTime').innerText = formatTime(audio.currentTime);
-        };
-
-        function seek(val) { if(audio.duration) audio.currentTime = (val/100)*audio.duration; }
-        function formatTime(s) { const m=Math.floor(s/60), sc=Math.floor(s%60); return `${m.toString().padStart(2,'0')}:${sc.toString().padStart(2,'0')}`; }
-
-        // Animation Loop
-        function draw() {
-            requestAnimationFrame(draw);
-            if(analyser) analyser.getByteFrequencyData(dataArray);
-            
-            const w = canvas.width = canvas.clientWidth * 2;
-            const h = canvas.height = canvas.clientHeight * 2;
-            ctx.clearRect(0, 0, w, h);
-            
-            const waveColor = document.getElementById('cWaves').value;
-            const waveScaleFactor = parseFloat(document.documentElement.style.getPropertyValue('--wave-scale') || 1);
-            const time = Date.now() * 0.003;
-            
-            let bass = 0; 
-            if(dataArray && !audio.paused) { 
-                for(let i=0; i<5; i++) bass += dataArray[i]; 
-                bass = (bass/5)/255; 
-            }
-            
-            // ELIMINADO: Ya no aplicamos la escala reactiva al playerContainer
-            // document.documentElement.style.setProperty('--player-scale', 1 + (bass * 0.15));
-
-            const drawWave = (amp, freq, speed, op, thick) => {
-                const scaledAmp = amp * waveScaleFactor;
-                ctx.beginPath(); 
-                ctx.lineWidth = thick; 
-                ctx.strokeStyle = waveColor + op;
-                for(let x=0; x<=w; x+=4) {
-                    const y = (h/2) + Math.sin(x*freq + time*speed) * scaledAmp;
-                    if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-                }
-                ctx.stroke();
-            };
-
-            drawWave(25+(bass*60), 0.004, 0.5, "33", 10);
-            drawWave(15+(bass*80), 0.008, 1.2, "88", 6);
-            drawWave(10+(bass*30), 0.015, 2.0, "FF", 3);
-        }
-
-        window.onload = draw;
-
-        // Export PNG logic
-        async function applyExportMargin(active) {
-            document.documentElement.style.setProperty('--export-padding', active ? '8px' : '0px');
-            await new Promise(r => setTimeout(r, 150)); 
-        }
-
-        async function downloadPinImage() {
-            const pin = document.getElementById('pinFrame');
-            const originalScale = document.documentElement.style.getPropertyValue('--pin-scale');
-            
-            document.documentElement.style.setProperty('--pin-scale', '1');
-            await applyExportMargin(true);
-
-            const canv = await html2canvas(pin, { 
-                useCORS: true, 
-                scale: 3,
-                backgroundColor: null,
-                width: parseInt(document.getElementById('inWidth').value),
-                height: parseInt(document.getElementById('inHeight').value)
-            });
-
-            const link = document.createElement('a');
-            link.download = `yv_studio_${Date.now()}.png`;
-            link.href = canv.toDataURL('image/png');
-            link.click();
-
-            document.documentElement.style.setProperty('--pin-scale', originalScale);
-            await applyExportMargin(false);
-        }
-    </script>
-</body>
-</html>
+export default App;
