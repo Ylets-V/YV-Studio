@@ -1,345 +1,520 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, addDoc, onSnapshot, doc, 
-  updateDoc, deleteDoc, arrayUnion, query, where 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  doc, 
+  updateDoc,
+  deleteDoc,
+  arrayUnion,
+  arrayRemove,
+  increment
 } from 'firebase/firestore';
 import { 
-  getAuth, signInAnonymously, onAuthStateChanged, 
-  TwitterAuthProvider, signInWithPopup, signOut, signInWithCustomToken
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  TwitterAuthProvider,
+  signInWithPopup,
+  signOut
 } from 'firebase/auth';
 import { 
-  Play, Pause, Music, Trash2, Sun, Moon, Edit3, X, 
-  Twitter, LogOut, Volume2, MessageCircle, Send, Mic, Square, 
-  RotateCcw, Plus, ListMusic, Languages, Sparkles,
-  SkipForward, SkipBack, Lock, Leaf
+  Play, 
+  Pause,
+  Music,
+  Trash2,
+  Sun,
+  Moon,
+  Edit3,
+  X,
+  Heart,
+  Twitter,
+  LogOut,
+  Lock,
+  ChevronDown,
+  User,
+  Globe,
+  SkipForward,
+  SkipBack,
+  Volume2,
+  Upload,
+  Languages,
+  Plus
 } from 'lucide-react';
 
-// Firebase Configuration
+// --- CONFIGURACIÓN FIREBASE ---
 const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const twitterProvider = new TwitterAuthProvider();
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'inefable-nature-v3';
-const apiKey = ""; // Gemini API Key logic handled by environment
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'inefable-sounds-studio';
+
+// --- TRADUCCIONES ---
+const translations = {
+  es: {
+    global: "Global",
+    myNotes: "Mis Notas",
+    vinculate: "Vincular X",
+    newNote: "Nueva Nota",
+    playing: "En el aire",
+    defaultTrack: "Estudio en calma...",
+    yourSounds: "Tus Sonidos",
+    silence: "Silencio absoluto",
+    addAudio: "Añadir Audio",
+    welcomeTitle: "Inefable",
+    welcomeDesc: "Conecta tu cuenta de X para dejar tu nota en este bosque digital.",
+    guest: "Explorar invitado",
+    modalTitle: "Título de la nota...",
+    modalPlaceholder: "Escribe aquí...",
+    modalKey: "Clave de edición...",
+    modalSubmit: "Publicar Recuerdo",
+    authWarningTitle: "Acceso Limitado",
+    authWarningDesc: "Debes vincular tu cuenta de X para poder publicar notas o dar likes.",
+    verifyTitle: "Clave de autoría",
+    verifySubmit: "Verificar",
+    by: "Por"
+  },
+  en: {
+    global: "Global",
+    myNotes: "My Notes",
+    vinculate: "Connect X",
+    newNote: "New Note",
+    playing: "On Air",
+    defaultTrack: "Calm study...",
+    yourSounds: "Your Sounds",
+    silence: "Absolute silence",
+    addAudio: "Add Audio",
+    welcomeTitle: "Ineffable",
+    welcomeDesc: "Connect your X account to leave your note in this digital forest.",
+    guest: "Explore as guest",
+    modalTitle: "Note title...",
+    modalPlaceholder: "Write here...",
+    modalKey: "Edition key...",
+    modalSubmit: "Publish Memory",
+    authWarningTitle: "Limited Access",
+    authWarningDesc: "You must link your X account to post notes or like them.",
+    verifyTitle: "Author Key",
+    verifySubmit: "Verify",
+    by: "By"
+  }
+};
 
 const App = () => {
+  // --- ESTADOS ---
+  const [lang, setLang] = useState('es');
   const [user, setUser] = useState(null);
-  const [isXConnected, setIsXConnected] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(true);
+  const [showWelcome, setShowWelcome] = useState(true);
   const [notes, setNotes] = useState([]);
-  const [activeTab, setActiveTab] = useState('public'); // 'public' | 'private'
-  const [theme, setTheme] = useState('dark');
-  const [expandedNote, setExpandedNote] = useState(null);
-  const [isCanvasOpen, setIsCanvasOpen] = useState(false);
+  const [filter, setFilter] = useState('all'); 
+  const [theme, setTheme] = useState('dark'); 
+  const [isCanvasVisible, setIsCanvasVisible] = useState(false);
+  const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
+  const [expandedNoteId, setExpandedNoteId] = useState(null);
+  const [showAuthWarning, setShowAuthWarning] = useState(false);
   
-  // Audio State
-  const [playlist, setPlaylist] = useState([]);
-  const [currentTrackIdx, setCurrentTrackIdx] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [volume, setVolume] = useState(0.6);
-  const [showPlaylist, setShowPlaylist] = useState(false);
-
-  // Note Editor State
   const [noteTitle, setNoteTitle] = useState("");
-  const [noteContent, setNoteContent] = useState("");
-  const [noteKey, setNoteKey] = useState("");
-  const [noteAudio, setNoteAudio] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
+  const [newNote, setNewNote] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [authorName, setAuthorName] = useState("");
+  const [alignment, setAlignment] = useState("center");
+  const [volume, setVolume] = useState(0.5);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [actionTarget, setActionTarget] = useState(null); 
+  const [authKey, setAuthKey] = useState("");
+  const [authError, setAuthError] = useState(false);
 
-  const audioRef = useRef(new Audio());
+  const [playlist, setPlaylist] = useState([]);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  
+  const ambientAudioRef = useRef(new Audio());
+  const t = translations[lang];
 
-  // --- Authentication Flow ---
+  const glassStyle = "backdrop-blur-xl bg-white/10 border border-white/20 shadow-2xl";
+
+  // --- DETECCIÓN IDIOMA SISTEMA ---
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      }
-    };
-    initAuth();
-
-    return onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      // Check if the provider is Twitter to enable writing
-      const connectedToX = u?.providerData.some(p => p.providerId === 'twitter.com');
-      setIsXConnected(connectedToX);
-      if (u) setShowAuthModal(false);
-    });
+    const systemLang = navigator.language.split('-')[0];
+    if (translations[systemLang]) setLang(systemLang);
   }, []);
 
-  const loginWithX = async () => {
-    try {
-      await signInWithPopup(auth, twitterProvider);
-    } catch (error) {
-      console.error("Error connecting to X:", error);
-    }
+  // --- LÓGICA DE TIEMPO ---
+  const isFromCurrentWeek = (timestamp) => {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const monday = new Date(now);
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    monday.setDate(diff);
+    monday.setHours(0, 0, 0, 0);
+    return date >= monday;
   };
 
-  const loginGuest = async () => {
-    await signInAnonymously(auth);
-    setShowAuthModal(false);
-  };
-
-  // --- Firestore Data ---
+  // --- AUTH & FIRESTORE ---
   useEffect(() => {
-    if (!user) return;
-    const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'notes');
-    
-    const unsubscribe = onSnapshot(notesRef, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setNotes(data);
-    }, (err) => console.error("Firestore Error:", err));
-
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u && !u.isAnonymous) {
+        setAuthorName(u.displayName);
+        setShowWelcome(false);
+      }
+    });
     return () => unsubscribe();
-  }, [user]);
+  }, []);
 
-  // --- Audio Player Logic ---
   useEffect(() => {
-    const audio = audioRef.current;
-    const updateProgress = () => setProgress((audio.currentTime / audio.duration) * 100 || 0);
-    audio.addEventListener('timeupdate', updateProgress);
-    audio.addEventListener('ended', () => nextTrack());
-    return () => {
-      audio.removeEventListener('timeupdate', updateProgress);
-      audio.removeEventListener('ended', () => nextTrack());
-    };
-  }, [playlist, currentTrackIdx]);
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'notes');
+    return onSnapshot(q, (snapshot) => {
+      const allNotes = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setNotes(allNotes.filter(n => isFromCurrentWeek(n.createdAt)));
+    }, (err) => console.error(err));
+  }, []);
 
-  useEffect(() => { audioRef.current.volume = volume; }, [volume]);
+  const loginWithTwitter = async () => {
+    try {
+      const result = await signInWithPopup(auth, twitterProvider);
+      setUser(result.user);
+      setAuthorName(result.user.displayName);
+      setShowAuthWarning(false);
+      setShowWelcome(false);
+    } catch (error) { console.error(error); }
+  };
 
-  const togglePlayback = () => {
+  const skipLogin = async () => {
+    if (!auth.currentUser) await signInAnonymously(auth);
+    setShowWelcome(false);
+  };
+
+  // --- AUDIO ---
+  useEffect(() => { ambientAudioRef.current.volume = volume; }, [volume]);
+
+  useEffect(() => {
+    if (playlist.length > 0 && playlist[currentTrackIndex]) {
+      ambientAudioRef.current.src = playlist[currentTrackIndex].url;
+      if (isPlaying) ambientAudioRef.current.play();
+    } else {
+      ambientAudioRef.current.pause();
+      setIsPlaying(false);
+    }
+    ambientAudioRef.current.onended = () => handleNextTrack();
+  }, [currentTrackIndex, playlist]);
+
+  const toggleMusic = () => {
     if (playlist.length === 0) return;
-    if (!audioRef.current.src) audioRef.current.src = playlist[currentTrackIdx].url;
-    if (isPlaying) audioRef.current.pause(); else audioRef.current.play();
+    isPlaying ? ambientAudioRef.current.pause() : ambientAudioRef.current.play();
     setIsPlaying(!isPlaying);
   };
 
-  const nextTrack = () => {
-    if (playlist.length === 0) return;
-    const nextIdx = (currentTrackIdx + 1) % playlist.length;
-    setCurrentTrackIdx(nextIdx);
-    audioRef.current.src = playlist[nextIdx].url;
-    audioRef.current.play();
-    setIsPlaying(true);
+  const handleNextTrack = () => playlist.length && setCurrentTrackIndex((prev) => (prev + 1) % playlist.length);
+  const handlePrevTrack = () => playlist.length && setCurrentTrackIndex((prev) => (prev - 1 + playlist.length) % playlist.length);
+
+  const removeTrack = (e, id) => {
+    e.stopPropagation();
+    const newPlaylist = playlist.filter(t => t.id !== id);
+    if (playlist[currentTrackIndex]?.id === id) {
+      setIsPlaying(false);
+      ambientAudioRef.current.pause();
+      setCurrentTrackIndex(0);
+    }
+    setPlaylist(newPlaylist);
   };
 
-  // --- Actions ---
-  const handleSaveNote = async () => {
-    if (!isXConnected) return; // Guard
-    if (!noteTitle || !noteContent || !noteKey) return;
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files);
+    const newTracks = files.map(file => ({
+      id: Math.random().toString(36).substr(2, 9),
+      name: file.name.replace(/\.[^/.]+$/, ""),
+      url: URL.createObjectURL(file)
+    }));
+    setPlaylist(prev => [...prev, ...newTracks]);
+  };
 
-    const newNoteDoc = {
-      title: noteTitle,
-      content: noteContent,
-      key: noteKey.toLowerCase(),
-      audioUrl: noteAudio,
-      author: user.displayName || "Nature Voice",
-      authorId: user.uid,
-      photo: user.photoURL,
-      createdAt: Date.now(),
-      x: 10 + Math.random() * 70,
-      y: 15 + Math.random() * 60
+  // --- MOVIMIENTO ---
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNotes(prev => prev.map(n => {
+        if (isCanvasVisible || expandedNoteId === n.id) return n;
+        let nX = (n.x || 50) + (n.vx || 0);
+        let nY = (n.y || 50) + (n.vy || 0);
+        if (nX < 5 || nX > 95) n.vx *= -1;
+        if (nY < 15 || nY > 85) n.vy *= -1;
+        return { ...n, x: nX, y: nY };
+      }));
+    }, 60);
+    return () => clearInterval(interval);
+  }, [expandedNoteId, isCanvasVisible]);
+
+  const handleLike = async (noteId, likedBy = []) => {
+    if (!user || user.isAnonymous) { setShowAuthWarning(true); return; }
+    const noteRef = doc(db, 'artifacts', appId, 'public', 'data', 'notes', noteId);
+    const hasLiked = likedBy.includes(user.uid);
+    await updateDoc(noteRef, { 
+      likedBy: hasLiked ? arrayRemove(user.uid) : arrayUnion(user.uid), 
+      likes: increment(hasLiked ? -1 : 1) 
+    });
+  };
+
+  const saveNote = async () => {
+    if (user?.isAnonymous || !user) { setShowAuthWarning(true); return; }
+    if (!newNote.trim() || !keyword.trim() || !noteTitle.trim()) return;
+    const noteData = {
+      title: noteTitle, text: newNote, alignment, author: authorName,
+      keyword: keyword.trim().toLowerCase(), updatedAt: Date.now(), uid: user.uid
     };
-
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), newNoteDoc);
-    setIsCanvasOpen(false);
-    resetEditor();
+    try {
+      if (editingNoteId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', editingNoteId), noteData);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), {
+          ...noteData, likes: 0, likedBy: [], 
+          x: 10 + Math.random() * 80, y: 20 + Math.random() * 60,
+          vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.5) * 0.05,
+          createdAt: Date.now()
+        });
+      }
+      resetForm(); setIsCanvasVisible(false);
+    } catch (err) { console.error(err); }
   };
 
-  const resetEditor = () => {
-    setNoteTitle(""); setNoteContent(""); setNoteKey(""); setNoteAudio(null);
+  const resetForm = () => {
+    setNoteTitle(""); setNewNote(""); setKeyword(""); 
+    setAuthorName(user && !user.isAnonymous ? user.displayName : ""); setEditingNoteId(null);
   };
 
+  const verifyAction = async () => {
+    const targetNote = notes.find(n => n.id === actionTarget.id);
+    if (targetNote.keyword === authKey.trim().toLowerCase()) {
+      if (actionTarget.type === 'delete') {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', actionTarget.id));
+      } else {
+        setEditingNoteId(targetNote.id); setNoteTitle(targetNote.title); setNewNote(targetNote.text);
+        setAuthorName(targetNote.author); setKeyword(targetNote.keyword); setIsCanvasVisible(true);
+      }
+      setActionTarget(null); setAuthKey("");
+    } else setAuthError(true);
+  };
+
+  const displayedNotes = filter === 'all' ? notes : notes.filter(n => n.uid === user?.uid);
   const isDark = theme === 'dark';
-  const displayedNotes = activeTab === 'public' ? notes : notes.filter(n => n.authorId === user?.uid);
 
   return (
-    <div className={`fixed inset-0 w-full h-full font-sans transition-colors duration-1000 overflow-hidden ${isDark ? 'text-white' : 'text-zinc-900'}`}>
+    <div className={`relative h-screen w-full flex flex-col font-sans overflow-hidden transition-colors duration-1000 ${isDark ? 'bg-zinc-950 text-white' : 'bg-[#f0f9f4] text-zinc-900'}`}>
       
-      {/* Dynamic Nature Background */}
-      <div className="absolute inset-0 z-0">
-        <div className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 scale-105 ${isDark ? 'brightness-[0.3] saturate-[0.4]' : 'brightness-[0.9] saturate-[0.7]'}`} 
-             style={{ backgroundImage: `url('https://images.unsplash.com/photo-1518173946687-a4c8a9ba332f?auto=format&fit=crop&w=1920&q=80')` }} />
-        <div className={`absolute inset-0 backdrop-blur-[2px] ${isDark ? 'bg-black/40' : 'bg-white/10'}`} />
+      {/* FONDO AMBIENTE */}
+      <div className="absolute inset-0 z-0 overflow-hidden">
+        <div 
+          className="absolute inset-0 bg-cover bg-center transition-all duration-1000 scale-105" 
+          style={{ backgroundImage: `url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1920&q=80')`, filter: isDark ? 'brightness(0.15) saturate(0.4)' : 'brightness(0.9) saturate(0.8)' }} 
+        />
+        <div className={`absolute inset-0 transition-opacity duration-1000 ${isDark ? 'bg-black/50' : 'bg-emerald-500/5'}`} />
       </div>
 
-      {/* Main Container */}
-      <div className="relative z-10 w-full h-full flex flex-col p-4 md:p-8">
-        
-        {/* Navigation Header */}
-        <header className="flex justify-center mb-8">
-          <div className={`flex items-center gap-2 p-2 rounded-full backdrop-blur-3xl border transition-all ${isDark ? 'bg-white/5 border-white/10' : 'bg-white/40 border-black/5 shadow-xl'}`}>
-            <div className="flex bg-black/10 p-1 rounded-full">
-              <button onClick={() => setTheme('light')} className={`p-2 rounded-full ${!isDark ? 'bg-white shadow-md' : 'opacity-40'}`}><Sun size={16}/></button>
-              <button onClick={() => setTheme('dark')} className={`p-2 rounded-full ${isDark ? 'bg-zinc-800 shadow-md' : 'opacity-40'}`}><Moon size={16}/></button>
-            </div>
-            
-            <div className="h-6 w-[1px] bg-current opacity-10 mx-2" />
-            
-            <div className="flex gap-1">
-              <button onClick={() => setActiveTab('public')} className={`px-5 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'public' ? 'bg-emerald-500 text-white shadow-lg' : 'opacity-40 hover:opacity-100'}`}>Global</button>
-              <button onClick={() => setActiveTab('private')} className={`px-5 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'private' ? 'bg-emerald-500 text-white shadow-lg' : 'opacity-40 hover:opacity-100'}`}>Privado</button>
-            </div>
+      {/* HEADER TRANSPARENTE */}
+      <div className="relative z-[60] w-full pt-6 px-6 pointer-events-none">
+        <header className={`max-w-6xl mx-auto flex items-center justify-between px-8 py-5 rounded-[2.5rem] border ${glassStyle} pointer-events-auto transition-all duration-500`}>
+          <div className="flex items-center gap-3">
+             <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="p-3 rounded-2xl bg-white/10 hover:bg-white/20 transition-all border border-white/10 text-emerald-400">
+               {isDark ? <Sun size={18} /> : <Moon size={18} />}
+             </button>
+             <button onClick={() => setLang(lang === 'es' ? 'en' : 'es')} className="p-3 rounded-2xl bg-white/10 hover:bg-white/20 transition-all border border-white/10 flex items-center gap-2">
+               <Languages size={18} className="text-emerald-400" />
+               <span className="text-[10px] font-black uppercase tracking-tighter">{lang}</span>
+             </button>
+             <div className="hidden md:flex bg-white/5 p-1 rounded-2xl border border-white/10 ml-2">
+                <button onClick={() => setFilter('all')} className={`px-5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${filter === 'all' ? 'bg-emerald-600/40 text-white shadow-inner' : 'opacity-40 hover:opacity-100'}`}>{t.global}</button>
+                <button onClick={() => setFilter('mine')} className={`px-5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${filter === 'mine' ? 'bg-emerald-600/40 text-white shadow-inner' : 'opacity-40 hover:opacity-100'}`}>{t.myNotes}</button>
+             </div>
+          </div>
 
-            <div className="h-6 w-[1px] bg-current opacity-10 mx-2" />
+          <h1 className="text-xl font-black tracking-[0.3em] uppercase opacity-80 hidden lg:block text-emerald-50">INEFABLE</h1>
 
-            {isXConnected ? (
-              <div className="flex items-center gap-3 pr-2">
-                <button onClick={() => setIsCanvasOpen(true)} className="bg-emerald-500 hover:bg-emerald-400 text-white px-5 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all shadow-lg">Crear</button>
-                <img src={user?.photoURL} className="w-8 h-8 rounded-full border border-white/20" alt="X Profile" />
-                <button onClick={() => signOut(auth)} className="opacity-40 hover:opacity-100"><LogOut size={16}/></button>
-              </div>
-            ) : (
-              <button onClick={loginWithX} className="bg-sky-500 hover:bg-sky-400 text-white px-5 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg">
-                <Twitter size={14} fill="white"/> Vincular X
+          <div className="flex items-center gap-4">
+            {(!user || user.isAnonymous) ? (
+              <button onClick={loginWithTwitter} className="p-3 rounded-2xl bg-black/60 text-white hover:bg-black transition-all shadow-lg border border-white/10 md:px-6 md:py-3 md:rounded-full flex items-center gap-2">
+                <Twitter size={14} fill="currentColor" /> 
+                <span className="hidden md:inline text-[9px] font-black uppercase tracking-widest">{t.vinculate}</span>
               </button>
+            ) : (
+              <div className="flex items-center gap-3 bg-white/10 p-1.5 pr-4 rounded-full border border-white/10">
+                <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} className="w-8 h-8 rounded-full border border-emerald-500/30" />
+                <button onClick={() => signOut(auth)} className="text-red-400 opacity-60 hover:opacity-100 transition-all"><LogOut size={14}/></button>
+              </div>
             )}
+            <button onClick={() => (user?.isAnonymous || !user ? setShowAuthWarning(true) : setIsCanvasVisible(true))} className="px-6 py-3 rounded-full font-black text-[9px] uppercase tracking-widest bg-emerald-600/80 text-white hover:bg-emerald-500 transition-all shadow-xl flex items-center gap-2 border border-white/20">
+              <Plus size={14} /> {t.newNote}
+            </button>
           </div>
         </header>
+      </div>
 
-        {/* Notes Canvas (Optimized for floating feel) */}
-        <main className="flex-1 relative overflow-hidden">
-          {displayedNotes.map(note => (
-            <div key={note.id} 
-                 onClick={() => setExpandedNote(note)}
-                 className="absolute cursor-pointer transition-transform hover:scale-110 group"
-                 style={{ left: `${note.x}%`, top: `${note.y}%` }}>
-              <div className={`p-6 rounded-[2rem] backdrop-blur-xl border transition-all ${isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-white/60 border-black/5 shadow-lg hover:shadow-2xl'}`}>
-                <Leaf className="mb-2 opacity-20 group-hover:opacity-100 transition-opacity" size={14} />
-                <h3 className="font-serif italic text-lg font-medium leading-none">{note.title}</h3>
-                <p className="text-[9px] font-bold uppercase tracking-widest mt-3 opacity-30">Por {note.author.split(' ')[0]}</p>
+      {/* CANVAS DE NOTAS FLOTANTES */}
+      <main className="relative flex-1 z-10 w-full">
+        {displayedNotes.map((note) => {
+          const isExpanded = expandedNoteId === note.id;
+          const hasLiked = note.likedBy?.includes(user?.uid);
+          return (
+            <div key={note.id} className={`absolute transition-all duration-[3500ms] ease-out ${isExpanded ? 'z-[100]' : 'z-20'}`} style={{ left: isExpanded ? '50%' : `${note.x}%`, top: isExpanded ? '50%' : `${note.y}%`, transform: `translate(-50%, -50%)` }}>
+              <div onClick={() => !isExpanded && setExpandedNoteId(note.id)} className={`group relative p-8 rounded-[3.5rem] border transition-all duration-700 ${isExpanded ? 'w-[90vw] max-w-lg max-h-[85vh] overflow-y-auto bg-zinc-900/95 text-white border-white/20 shadow-[0_0_100px_rgba(0,0,0,0.8)]' : `${glassStyle} min-w-[160px] max-w-[220px] cursor-pointer hover:scale-110 active:scale-95 border-white/10 hover:border-emerald-500/30`}`}>
+                {isExpanded && <button onClick={(e) => { e.stopPropagation(); setExpandedNoteId(null); }} className="absolute top-8 right-8 text-zinc-400 hover:text-white"><X size={20}/></button>}
+                <div className="text-center mb-4">
+                  <h3 className={`font-serif italic leading-tight mb-1 text-emerald-50 ${isExpanded ? 'text-4xl font-black' : 'text-sm font-bold truncate'}`}>{note.title}</h3>
+                  <p className="text-[7px] font-black uppercase tracking-[0.4em] opacity-40 text-emerald-300">{t.by} {note.author}</p>
+                </div>
+                {isExpanded && (
+                  <div className="animate-in pt-6">
+                    <p className="text-2xl font-serif italic mb-10 leading-relaxed text-zinc-300" style={{ textAlign: note.alignment }}>"{note.text}"</p>
+                    <button onClick={(e) => { e.stopPropagation(); handleLike(note.id, note.likedBy); }} className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl transition-all ${hasLiked ? 'bg-red-500/80 text-white' : 'bg-white/5 hover:bg-white/10 border border-white/10'}`}>
+                        <Heart size={18} fill={hasLiked ? "white" : "none"} />
+                        <span className="text-xs font-black">{note.likes || 0}</span>
+                    </button>
+                    {user?.uid === note.uid && (
+                      <div className="flex justify-center gap-6 mt-8 pt-8 border-t border-white/10">
+                        <button onClick={(e) => { e.stopPropagation(); setActionTarget({ id: note.id, type: 'edit' }); }} className="p-3 text-emerald-400 bg-emerald-500/10 rounded-xl hover:bg-emerald-500/20"><Edit3 size={16} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setActionTarget({ id: note.id, type: 'delete' }); }} className="p-3 text-red-400 bg-red-500/10 rounded-xl hover:bg-red-500/20"><Trash2 size={16} /></button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!isExpanded && <div className="mt-2 flex justify-center opacity-0 group-hover:opacity-30 transition-opacity text-emerald-300"><ChevronDown size={14} /></div>}
               </div>
             </div>
-          ))}
-        </main>
+          );
+        })}
+      </main>
 
-        {/* Minimalist Player */}
-        <footer className="flex justify-center mt-auto pb-4">
-          <div className={`w-full max-w-4xl p-4 rounded-[2.5rem] backdrop-blur-3xl border flex items-center gap-6 shadow-2xl transition-all ${isDark ? 'bg-zinc-950/40 border-white/10' : 'bg-white/70 border-black/5'}`}>
-            
-            <div className="flex items-center gap-4">
-              <button onClick={() => setCurrentTrackIdx(p => (p-1+playlist.length)%playlist.length)} className="opacity-30 hover:opacity-100"><SkipBack size={18}/></button>
-              <button onClick={togglePlayback} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${isDark ? 'bg-white text-black' : 'bg-emerald-500 text-white'}`}>
-                {isPlaying ? <Pause size={20} fill="currentColor"/> : <Play size={20} fill="currentColor" className="ml-1"/>}
-              </button>
-              <button onClick={nextTrack} className="opacity-30 hover:opacity-100"><SkipForward size={18}/></button>
+      {/* REPRODUCTOR TRANSPARENTE MEJORADO */}
+      <div className="relative z-[60] w-full pb-8 px-6 pointer-events-none">
+        <footer className={`max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 px-10 py-5 rounded-[3rem] border ${glassStyle} pointer-events-auto transition-all duration-500`}>
+          
+          {/* MÚSICA & BIBLIOTECA */}
+          <div className="flex-1 flex items-center gap-5 relative w-full md:w-auto">
+            <button onClick={() => setIsPlaylistOpen(!isPlaylistOpen)} className={`p-4 rounded-2xl transition-all shadow-xl border ${isPlaylistOpen ? 'bg-emerald-600 border-emerald-400 text-white scale-105' : 'bg-white/5 text-emerald-300 border-white/10 hover:bg-white/10'}`}>
+              <Music size={20} />
+            </button>
+            <div className="truncate">
+              <p className="text-[7px] font-black opacity-40 uppercase tracking-[0.3em] text-emerald-200">{t.playing}</p>
+              <p className="text-xs font-serif italic font-black truncate max-w-[150px] text-white">{playlist[currentTrackIndex]?.name || t.defaultTrack}</p>
             </div>
 
-            <div className="flex-1 flex flex-col gap-1">
-              <div className="flex justify-between items-end px-1">
-                <span className="text-[10px] font-bold uppercase tracking-tighter opacity-40 truncate max-w-[200px]">
-                  {playlist[currentTrackIdx]?.name || "Naturaleza en reposo"}
-                </span>
-                <span className="text-[9px] font-mono opacity-30">0:{Math.floor(audioRef.current.currentTime).toString().padStart(2, '0')}</span>
+            {isPlaylistOpen && (
+              <div className={`absolute bottom-24 left-0 w-80 p-6 rounded-[2.5rem] border shadow-2xl animate-in ${glassStyle} z-[110]`}>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-[9px] font-black uppercase tracking-widest opacity-40 text-emerald-100">{t.yourSounds}</h4>
+                  <button onClick={() => setIsPlaylistOpen(false)} className="opacity-30 hover:opacity-100"><X size={14}/></button>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto mb-4 pr-1 custom-scrollbar">
+                  {playlist.length === 0 ? <p className="text-center py-6 text-[10px] font-serif italic opacity-30">{t.silence}</p> : 
+                    playlist.map((track, idx) => (
+                      <div key={track.id} className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer border ${currentTrackIndex === idx ? 'bg-emerald-600/30 border-emerald-500/50' : 'hover:bg-white/5 border-transparent'}`} onClick={() => setCurrentTrackIndex(idx)}>
+                        <Music size={12} className={currentTrackIndex === idx ? "text-emerald-400" : "text-zinc-500"} />
+                        <span className="text-[10px] font-serif italic truncate">{track.name}</span>
+                        <button onClick={(e) => removeTrack(e, track.id)} className="ml-auto opacity-0 group-hover:opacity-100 text-red-400"><Trash2 size={12}/></button>
+                      </div>
+                    ))
+                  }
+                </div>
+                <label className="flex items-center justify-center gap-2 py-4 border-2 border-dashed border-emerald-500/20 rounded-2xl cursor-pointer hover:bg-emerald-500/5 hover:border-emerald-500/40 transition-all text-emerald-300 font-black text-[8px] uppercase tracking-widest">
+                  <Upload size={14} /> {t.addAudio}
+                  <input type="file" className="hidden" accept="audio/*" multiple onChange={handleFileUpload} />
+                </label>
               </div>
-              <div className="h-1 w-full bg-current/10 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
+            )}
+          </div>
 
-            <div className="flex items-center gap-4 px-2">
-              <div className="flex items-center gap-2 group">
-                <Volume2 size={14} className="opacity-30" />
-                <input type="range" min="0" max="1" step="0.01" value={volume} onChange={e => setVolume(parseFloat(e.target.value))} className="w-16 h-1 accent-emerald-500 opacity-20 group-hover:opacity-100 transition-opacity" />
-              </div>
-              <label className="cursor-pointer opacity-30 hover:opacity-100 transition-opacity">
-                <Plus size={18}/>
-                <input type="file" hidden multiple accept="audio/*" onChange={e => {
-                  const files = Array.from(e.target.files).map(f => ({ id: Math.random(), name: f.name.replace(/\.[^/.]+$/, ""), url: URL.createObjectURL(f) }));
-                  setPlaylist(p => [...p, ...files]);
-                }} />
-              </label>
-              <button onClick={() => setShowPlaylist(!showPlaylist)} className={`transition-opacity ${showPlaylist ? 'text-emerald-500 opacity-100' : 'opacity-30'}`}><ListMusic size={18}/></button>
-            </div>
+          {/* PLAYBACK CONTROLS */}
+          <div className="flex items-center gap-8">
+            <button onClick={handlePrevTrack} className="opacity-40 hover:opacity-100 transition-all text-white"><SkipBack size={22}/></button>
+            <button onClick={toggleMusic} className={`w-14 h-14 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-white text-black' : 'bg-emerald-500 text-white'}`}>
+              {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
+            </button>
+            <button onClick={handleNextTrack} className="opacity-40 hover:opacity-100 transition-all text-white"><SkipForward size={22}/></button>
+          </div>
+
+          {/* VOLUMEN Y BARRA PROGRESO MINI */}
+          <div className="flex-1 flex justify-end items-center gap-5 w-full md:w-auto">
+             <div className="flex items-center gap-3 group">
+                <Volume2 size={18} className="opacity-40 text-white group-hover:text-emerald-400 transition-colors" />
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="1" 
+                  step="0.01" 
+                  value={volume} 
+                  onChange={(e) => setVolume(parseFloat(e.target.value))} 
+                  className="w-24 accent-emerald-500 h-1 rounded-full cursor-pointer opacity-30 hover:opacity-100 transition-all bg-white/20" 
+                />
+             </div>
+             <button className="p-2 hover:bg-white/10 rounded-full transition-colors opacity-30 hover:opacity-100">
+               <X size={18} className="text-white" />
+             </button>
           </div>
         </footer>
-
-        {/* Modals & Overlays */}
-        
-        {/* Connection Requirement Modal */}
-        {showAuthModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xl">
-            <div className="w-full max-w-sm p-12 bg-zinc-950/80 rounded-[4rem] border border-white/10 text-center shadow-3xl animate-in">
-              <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-8 text-emerald-500">
-                <Leaf size={40} />
-              </div>
-              <h2 className="text-4xl font-serif italic mb-2 tracking-tighter">Inefable</h2>
-              <p className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-30 mb-12">Portal de Resonancia</p>
-              
-              <div className="space-y-4">
-                <button onClick={loginWithX} className="w-full py-5 bg-white text-black rounded-[2rem] font-bold text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-105 transition-all">
-                  <Twitter size={16} fill="currentColor"/> Conectar con X
-                </button>
-                <button onClick={loginGuest} className="w-full py-5 border border-white/10 rounded-[2rem] font-bold text-[9px] uppercase tracking-widest opacity-40 hover:opacity-100 transition-all">
-                  Explorar Bosque
-                </button>
-              </div>
-              <p className="mt-8 text-[8px] font-bold uppercase tracking-widest opacity-20">Es necesario X para escribir notas</p>
-            </div>
-          </div>
-        )}
-
-        {/* Expanded Note View */}
-        {expandedNote && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-2xl" onClick={() => setExpandedNote(null)}>
-            <div className={`w-full max-w-4xl h-[70vh] rounded-[4rem] overflow-hidden border flex flex-col md:flex-row animate-in ${isDark ? 'bg-zinc-950/90 border-white/10' : 'bg-white border-black/5'}`} onClick={e => e.stopPropagation()}>
-              <div className="flex-1 p-12 overflow-y-auto custom-scrollbar relative">
-                <button onClick={() => setExpandedNote(null)} className="absolute top-8 right-8 opacity-30 hover:opacity-100"><X size={24}/></button>
-                <div className="flex items-center gap-3 mb-10 opacity-40">
-                  <img src={expandedNote.photo} className="w-8 h-8 rounded-full" alt="" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">{expandedNote.author}</span>
-                </div>
-                <h2 className="text-6xl md:text-8xl font-serif italic mb-8 tracking-tighter leading-none">{expandedNote.title}</h2>
-                <p className="text-xl md:text-3xl font-serif italic leading-relaxed opacity-80 whitespace-pre-wrap">{expandedNote.content}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Composition Canvas */}
-        {isCanvasOpen && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/90 backdrop-blur-3xl" onClick={() => setIsCanvasOpen(false)}>
-            <div className={`w-full max-w-3xl p-12 rounded-[4rem] border shadow-3xl animate-in ${isDark ? 'bg-zinc-950/90 border-white/10' : 'bg-white border-black/5'}`} onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between mb-12">
-                <div className="px-4 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
-                  <Edit3 size={12}/> Componiendo Eco
-                </div>
-                <button onClick={() => setIsCanvasOpen(false)} className="opacity-30 hover:opacity-100"><X size={24}/></button>
-              </div>
-              
-              <input value={noteTitle} onChange={e => setNoteTitle(e.target.value)} placeholder="Título..." className="w-full bg-transparent text-5xl md:text-7xl font-serif italic mb-8 outline-none border-none tracking-tighter text-center" />
-              <textarea value={noteContent} onChange={e => setNoteContent(e.target.value)} placeholder="Escribe tu resonancia..." className="w-full bg-transparent text-xl md:text-3xl font-serif italic h-48 outline-none border-none resize-none mb-8 text-center custom-scrollbar" />
-              
-              <div className="flex flex-col md:flex-row gap-6 mb-12">
-                <input type="password" value={noteKey} onChange={e => setNoteKey(e.target.value)} placeholder="Clave de autoría" className="flex-1 bg-current/5 border border-current/10 rounded-full px-8 py-4 outline-none text-center font-bold text-xs uppercase tracking-widest" />
-                <button onClick={handleSaveNote} className="flex-[2] py-5 bg-emerald-500 text-white rounded-full font-bold text-[12px] uppercase tracking-[0.4em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all">Publicar</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CSS for Scrollbar and Effects */}
-        <style dangerouslySetInnerHTML={{ __html: `
-          @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,400;1,700&family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
-          
-          body { font-family: 'Plus Jakarta Sans', sans-serif; overflow: hidden; }
-          .font-serif { font-family: 'Playfair Display', serif; }
-          
-          /* Hide Scrollbars */
-          .custom-scrollbar::-webkit-scrollbar { width: 0px; background: transparent; }
-          .custom-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
-          
-          .animate-in { animation: fadeIn 0.8s cubic-bezier(0.19, 1, 0.22, 1); }
-          @keyframes fadeIn { from { opacity: 0; transform: scale(0.95) translateY(20px); filter: blur(10px); } to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); } }
-          
-          .shadow-3xl { box-shadow: 0 60px 100px -30px rgba(0,0,0,0.8); }
-          
-          input[type="range"] { -webkit-appearance: none; background: transparent; }
-          input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 10px; width: 10px; border-radius: 50%; background: #10b981; cursor: pointer; border: 2px solid white; box-shadow: 0 0 10px rgba(16,185,129,0.5); }
-        `}} />
       </div>
+
+      {/* MODALES REUTILIZANDO EL MISMO DISEÑO */}
+      {showWelcome && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-black/40 backdrop-blur-3xl">
+          <div className={`max-w-sm w-full p-12 rounded-[4rem] border ${glassStyle} text-center animate-in`}>
+            <h2 className="text-4xl font-serif italic font-black mb-4 text-white">{t.welcomeTitle}</h2>
+            <p className="text-xs opacity-50 mb-10 font-serif italic text-emerald-100">{t.welcomeDesc}</p>
+            <div className="space-y-3">
+              <button onClick={loginWithTwitter} className="w-full py-5 bg-white text-black rounded-2xl flex items-center justify-center gap-3 font-black uppercase text-[9px] tracking-widest hover:scale-105 transition-all shadow-xl"><Twitter size={16} fill="currentColor" /> {t.vinculate}</button>
+              <button onClick={skipLogin} className="w-full py-5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-2xl font-black uppercase text-[8px] tracking-widest hover:bg-emerald-500/20 transition-all">{t.guest}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isCanvasVisible && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-2xl">
+          <div className={`w-full max-w-lg p-12 rounded-[4rem] border ${glassStyle} animate-in`}>
+            <input type="text" placeholder={t.modalTitle} value={noteTitle} onChange={e => setNoteTitle(e.target.value)} className="w-full bg-transparent text-3xl font-serif italic mb-6 outline-none font-black text-center text-white placeholder:text-white/20" />
+            <textarea value={newNote} onChange={e => setNewNote(e.target.value)} placeholder={t.modalPlaceholder} className="w-full bg-transparent text-xl font-serif italic outline-none resize-none mb-8 h-32 opacity-70 text-center text-emerald-50 placeholder:text-white/20" />
+            <input type="password" placeholder={t.modalKey} value={keyword} onChange={e => setKeyword(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-xs outline-none text-center font-bold tracking-widest mb-8 text-white" />
+            <button onClick={saveNote} className="w-full py-6 rounded-[2rem] font-black text-[10px] uppercase tracking-[0.4em] bg-emerald-600 text-white shadow-2xl hover:bg-emerald-500 transition-all border border-white/20">{t.modalSubmit}</button>
+            <button onClick={() => setIsCanvasVisible(false)} className="w-full mt-4 text-[8px] uppercase font-black opacity-30 hover:opacity-100 tracking-widest text-white">Cerrar</button>
+          </div>
+        </div>
+      )}
+
+      {showAuthWarning && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/80 backdrop-blur-3xl">
+          <div className={`max-w-xs w-full p-10 rounded-[3.5rem] text-center animate-in ${glassStyle}`}>
+            <Lock size={24} className="mx-auto mb-6 text-red-400" />
+            <h2 className="text-xl font-serif italic font-black mb-2 text-white">{t.authWarningTitle}</h2>
+            <p className="text-[10px] opacity-40 mb-8 font-serif italic leading-relaxed text-emerald-100">{t.authWarningDesc}</p>
+            <button onClick={loginWithTwitter} className="w-full py-4 bg-white text-black rounded-xl font-black uppercase text-[8px] tracking-widest flex items-center justify-center gap-2 shadow-lg hover:scale-105 transition-all"><Twitter size={14} fill="currentColor"/> {t.vinculate}</button>
+            <button onClick={() => setShowAuthWarning(false)} className="mt-4 text-[8px] font-black opacity-30 uppercase tracking-widest text-white">Quizás luego</button>
+          </div>
+        </div>
+      )}
+
+      {actionTarget && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/90 backdrop-blur-md p-6">
+          <div className={`w-full max-w-xs ${glassStyle} rounded-[3rem] p-10 text-center animate-in`}>
+            <p className="text-[8px] mb-6 opacity-40 uppercase font-black tracking-widest text-emerald-100">{t.verifyTitle}</p>
+            <input type="password" value={authKey} onChange={e => setAuthKey(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-center text-sm mb-6 outline-none text-white font-bold" />
+            <button onClick={verifyAction} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-emerald-500 transition-all">{t.verifySubmit}</button>
+            <button onClick={() => setActionTarget(null)} className="w-full mt-4 text-[8px] opacity-30 uppercase font-black tracking-widest text-white">Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,400;1,700;1,900&family=Inter:wght@400;700;900&display=swap');
+        .font-serif { font-family: 'Playfair Display', serif; }
+        .font-sans { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+        @keyframes fade-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-in { animation: fade-in 0.5s cubic-bezier(0.165, 0.84, 0.44, 1); }
+        input[type="range"] { -webkit-appearance: none; background: rgba(255,255,255,0.1); }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; background: #10b981; border-radius: 50%; box-shadow: 0 0 10px rgba(16,185,129,0.5); }
+      `}} />
     </div>
   );
 };
